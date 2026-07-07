@@ -2,10 +2,32 @@
  * GET  /api/audit/vulnerabilities?report_id=xxx&severity=critical&category_id=LLM01&status=open&page=1&limit=20&search=...
  * PATCH /api/audit/vulnerabilities
  *   Body: { id, status }  — update vulnerability status
+ *
+ * Fail-loud contract:
+ *   - All inputs validated explicitly, no silent coercion
+ *   - DB errors surface as 500 with detail (not empty array)
+ *   - Required fields must be present; throw if missing
  */
-
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "@/utils/supabase/server";
+
+const VALID_SEVERITIES = ["critical", "high", "medium", "low"] as const;
+const VALID_STATUSES = ["open", "confirmed", "fixed", "wontfix"] as const;
+const VALID_SORTS = ["created_at", "severity", "title", "status"] as const;
+
+function parseIntStrict(raw: string | null, field: string): number {
+  if (raw === null) throw new Error(`Missing required numeric param: ${field}`);
+  const n = parseInt(raw, 10);
+  if (Number.isNaN(n)) throw new Error(`Invalid numeric value for ${field}: ${raw}`);
+  return n;
+}
+
+function requireString(v: unknown, field: string): string {
+  if (typeof v !== "string" || v.length === 0) {
+    throw new Error(`Field "${field}" must be a non-empty string`);
+  }
+  return v;
+}
 
 /**
  * GET — query vulnerabilities with filters, pagination, and sorting.
@@ -24,37 +46,63 @@ export async function GET(request: NextRequest) {
     const severity = searchParams.get("severity");
     const categoryId = searchParams.get("category_id");
     const status = searchParams.get("status");
-    const search = searchParams.get("search") ?? "";
-    const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10));
-    const limit = Math.min(50, Math.max(1, parseInt(searchParams.get("limit") ?? "20", 10)));
-    const sort = searchParams.get("sort") ?? "created_at";
-    const order = searchParams.get("order") === "asc" ? "asc" : "desc";
+    const search = searchParams.get("search");
 
-    // Must scope to at least the user's reports
+    const page = searchParams.get("page") === null
+      ? 1
+      : parseIntStrict(searchParams.get("page"), "page");
+    const limit = searchParams.get("limit") === null
+      ? 20
+      : parseIntStrict(searchParams.get("limit"), "limit");
+    if (page < 1) throw new Error("page must be >= 1");
+    if (limit < 1 || limit > 50) throw new Error("limit must be 1..50");
+
+    const sortRaw = searchParams.get("sort");
+    const sortColumn = sortRaw && (VALID_SORTS as readonly string[]).includes(sortRaw)
+      ? sortRaw
+      : "created_at";
+
+    const orderRaw = searchParams.get("order");
+    if (orderRaw !== null && orderRaw !== "asc" && orderRaw !== "desc") {
+      throw new Error(`Invalid order: ${orderRaw}`);
+    }
+    const order = orderRaw === "asc" ? "asc" : "desc";
+
+    if (severity !== null && !(VALID_SEVERITIES as readonly string[]).includes(severity)) {
+      throw new Error(`Invalid severity: ${severity}`);
+    }
+    if (status !== null && !(VALID_STATUSES as readonly string[]).includes(status)) {
+      throw new Error(`Invalid status: ${status}`);
+    }
+
+    // Scope to user's owned reports
+    const { data: userReports, error: reportsErr } = await supabase
+      .from("audit_reports")
+      .select("id")
+      .eq("user_id", session.user.id);
+    if (reportsErr) throw new Error(`Failed to load owned reports: ${reportsErr.message}`);
+    if (!Array.isArray(userReports)) throw new Error("Owned reports query did not return array");
+    if (userReports.length === 0) {
+      return NextResponse.json({ vulnerabilities: [], total: 0, page, limit, totalPages: 1 });
+    }
+    const ownedIds = userReports.map((r: any) => r.id);
+
     let query = supabase
       .from("vulnerabilities")
       .select(`
         *,
         vulnerability_categories!inner(name, owasp_url)
       `, { count: "exact" })
-      .in("report_id", (await supabase
-        .from("audit_reports")
-        .select("id")
-        .eq("user_id", session.user.id)
-      ).data?.map(r => r.id) ?? []);
+      .in("report_id", ownedIds);
 
-    // Filters
-    if (reportId) query = query.eq("report_id", reportId);
-    if (severity) query = query.eq("severity", severity);
-    if (categoryId) query = query.eq("category_id", categoryId);
-    if (status) query = query.eq("status", status);
-    if (search) {
+    if (reportId !== null) query = query.eq("report_id", reportId);
+    if (severity !== null) query = query.eq("severity", severity);
+    if (categoryId !== null) query = query.eq("category_id", categoryId);
+    if (status !== null) query = query.eq("status", status);
+    if (search !== null && search.length > 0) {
       query = query.or(`title.ilike.%${search}%,description.ilike.%${search}%`);
     }
 
-    // Sort & pagination
-    const validSorts = ["created_at", "severity", "title", "status"];
-    const sortColumn = validSorts.includes(sort) ? sort : "created_at";
     const from = (page - 1) * limit;
     const to = from + limit - 1;
 
@@ -62,42 +110,48 @@ export async function GET(request: NextRequest) {
       .order(sortColumn, { ascending: order === "asc" })
       .range(from, to);
 
-    if (error) {
-      console.error("Vulnerabilities query error:", error.message);
-      return NextResponse.json({ vulnerabilities: [], total: 0 });
-    }
+    if (error) throw new Error(`Vulnerabilities query failed: ${error.message}`);
+    if (count === null) throw new Error("Count not returned");
+    if (!Array.isArray(data)) throw new Error("Vulnerabilities query did not return array");
 
-    // Transform
-    const vulnerabilities = (data ?? []).map((row: any) => ({
-      id: row.id,
-      report_id: row.report_id,
-      title: row.title,
-      severity: row.severity,
-      category_id: row.category_id,
-      category_name: row.vulnerability_categories?.name ?? row.category_id,
-      description: row.description,
-      remediation: row.remediation,
-      file_path: row.file_path,
-      line_number: row.line_number,
-      code_snippet: row.code_snippet,
-      root_cause: row.root_cause,
-      attack_path: row.attack_path,
-      impact: row.impact,
-      cvss_score: row.cvss_score,
-      status: row.status,
-      created_at: row.created_at,
-    }));
+    const vulnerabilities = data.map((row: any) => {
+      if (!row.vulnerability_categories) {
+        throw new Error(`Vulnerability ${row.id} missing joined category record`);
+      }
+      return {
+        id: row.id,
+        report_id: requireString(row.report_id, "report_id"),
+        title: requireString(row.title, "title"),
+        severity: requireString(row.severity, "severity"),
+        category_id: requireString(row.category_id, "category_id"),
+        category_name: requireString(row.vulnerability_categories.name, "category_name"),
+        description: row.description,
+        remediation: row.remediation,
+        file_path: row.file_path,
+        line_number: row.line_number,
+        code_snippet: row.code_snippet,
+        root_cause: row.root_cause,
+        attack_path: row.attack_path,
+        impact: row.impact,
+        cvss_score: row.cvss_score,
+        status: requireString(row.status, "status"),
+        created_at: row.created_at,
+      };
+    });
 
     return NextResponse.json({
       vulnerabilities,
-      total: count ?? 0,
+      total: count,
       page,
       limit,
-      totalPages: count ? Math.ceil(count / limit) : 1,
+      totalPages: Math.ceil(count / limit),
     });
   } catch (error) {
     console.error("Vulnerabilities API error:", error);
-    return NextResponse.json({ vulnerabilities: [], total: 0 });
+    return NextResponse.json(
+      { error: "Internal server error", detail: error instanceof Error ? error.message : String(error) },
+      { status: 500 },
+    );
   }
 }
 
@@ -113,35 +167,45 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { id, status: newStatus } = await request.json();
-
-    if (!id || !newStatus) {
-      return NextResponse.json({ error: "id and status are required" }, { status: 400 });
+    let body: any;
+    try {
+      body = await request.json();
+    } catch (err) {
+      return NextResponse.json({ error: `Invalid JSON: ${err instanceof Error ? err.message : String(err)}` }, { status: 400 });
     }
 
-    const validStatuses = ["open", "confirmed", "fixed", "wontfix"];
-    if (!validStatuses.includes(newStatus)) {
-      return NextResponse.json({ error: `Invalid status. Must be one of: ${validStatuses.join(", ")}` }, { status: 400 });
+    const id = body?.id;
+    const newStatus = body?.status;
+
+    if (typeof id !== "string" || id.length === 0) {
+      return NextResponse.json({ error: "id is required (non-empty string)" }, { status: 400 });
+    }
+    if (typeof newStatus !== "string" || !(VALID_STATUSES as readonly string[]).includes(newStatus)) {
+      return NextResponse.json(
+        { error: `Invalid status. Must be one of: ${VALID_STATUSES.join(", ")}` },
+        { status: 400 },
+      );
     }
 
-    // Verify ownership: vuln must belong to a report owned by the user
     const { data: vuln, error: fetchError } = await supabase
       .from("vulnerabilities")
       .select("report_id")
       .eq("id", id)
       .single();
 
-    if (fetchError || !vuln) {
+    if (fetchError) throw new Error(`Vulnerability lookup failed: ${fetchError.message}`);
+    if (!vuln) {
       return NextResponse.json({ error: "Vulnerability not found" }, { status: 404 });
     }
 
-    const { data: report } = await supabase
+    const { data: report, error: reportErr } = await supabase
       .from("audit_reports")
       .select("user_id")
       .eq("id", vuln.report_id)
       .eq("user_id", session.user.id)
       .single();
 
+    if (reportErr) throw new Error(`Report lookup failed: ${reportErr.message}`);
     if (!report) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
     }
@@ -152,13 +216,15 @@ export async function PATCH(request: NextRequest) {
       .eq("id", id);
 
     if (updateError) {
-      console.error("Vulnerability update error:", updateError.message);
-      return NextResponse.json({ error: "Failed to update vulnerability" }, { status: 500 });
+      throw new Error(`Failed to update vulnerability: ${updateError.message}`);
     }
 
     return NextResponse.json({ success: true, id, status: newStatus });
   } catch (error) {
     console.error("Vulnerabilities PATCH error:", error);
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Internal server error", detail: error instanceof Error ? error.message : String(error) },
+      { status: 500 },
+    );
   }
 }

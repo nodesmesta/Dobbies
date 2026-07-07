@@ -1,12 +1,16 @@
 /**
  * LLM-based static analyzer for AI agent security audit.
  *
- * Replaces simple keyword matching with contextual LLM analysis
- * against OWASP LLM Top 10 (LLM01–LLM10).
- *
  * Two analysis layers:
  *   1. Structural tool analysis — detect dangerous tool names/descriptions
  *   2. LLM prompt analysis — contextual review of system prompt semantics
+ *
+ * Fail-loud contract:
+ *   - Missing systemPrompt or tools throws
+ *   - LLM failure throws
+ *   - LLM returning malformed JSON throws
+ *   - Unknown severity in LLM output throws
+ *   - Empty `findings` array is a valid clean result, not a fallback
  */
 import { chatCompletion } from "@/lib/llm/client";
 import type { Severity } from "@/lib/audit/types";
@@ -32,6 +36,34 @@ interface StaticFinding {
 export interface StaticResult {
   matches: StaticFinding[];
   score: number;
+}
+
+interface RawFinding {
+  category_id: unknown;
+  title: unknown;
+  severity: unknown;
+  description: unknown;
+  root_cause: unknown;
+  impact: unknown;
+  remediation: unknown;
+  matched_context: unknown;
+  cvss_score: unknown;
+  file_path: unknown;
+  line_number: unknown;
+  code_snippet: unknown;
+}
+
+// ── Severity validation ─────────────────────────────────────
+
+const VALID_SEVERITIES = new Set<Severity>(["critical", "high", "medium", "low"]);
+
+function requireSeverity(v: unknown, index: number): Severity {
+  if (typeof v !== "string" || !VALID_SEVERITIES.has(v as Severity)) {
+    throw new Error(
+      `Static-analysis finding #${index} has invalid severity: ${String(v)} (must be critical|high|medium|low)`,
+    );
+  }
+  return v as Severity;
 }
 
 // ── Structural analysis (no LLM) ─────────────────────────────
@@ -107,6 +139,11 @@ function analyzeTools(tools: { name: string; description: string }[]): StaticFin
   const findings: StaticFinding[] = [];
 
   for (const tool of tools) {
+    if (!tool.name) throw new Error("Tool entry missing `name`");
+    if (typeof tool.description !== "string") {
+      throw new Error(`Tool "${tool.name}" has non-string description`);
+    }
+
     const combined = `${tool.name} ${tool.description}`;
 
     for (const pattern of DANGEROUS_TOOL_PATTERNS) {
@@ -179,27 +216,77 @@ Schema:
 - For excessive agency: check if tools have broad permissions without guardrails
 - For sensitive data: check if actual secrets appear in the prompt
 - Be specific about what text in the prompt is problematic
-- If the prompt is a Python file (code), analyze the code for dangerous patterns`;
+`;
 
 function buildAnalysisPrompt(systemPrompt: string, toolsDescription: string): string {
   return `<system_prompt>
-${systemPrompt || "(empty)"}
+${systemPrompt}
 </system_prompt>
 
 <tool_definitions>
-${toolsDescription || "(none)"}
+${toolsDescription}
 </tool_definitions>
 
 Analyze the above system prompt and tool definitions for OWASP LLM Top 10 security vulnerabilities. Return your findings as a JSON array.`;
+}
 
+function coerceFindingsArray(parsed: unknown): RawFinding[] {
+  if (Array.isArray(parsed)) return parsed as RawFinding[];
+  if (typeof parsed !== "object" || parsed === null) {
+    throw new Error("Static-analyzer LLM JSON is not an object/array");
+  }
+  const obj = parsed as Record<string, unknown>;
+  if (Array.isArray(obj.findings)) return obj.findings as RawFinding[];
+  if (Array.isArray(obj.vulnerabilities)) return obj.vulnerabilities as RawFinding[];
+  if (Array.isArray(obj.results)) return obj.results as RawFinding[];
+  throw new Error(
+    "Static-analyzer LLM JSON has no `findings`, `vulnerabilities`, or `results` array",
+  );
+}
+
+function requireString(v: unknown, field: string, index: number): string {
+  if (typeof v !== "string" || v.length === 0) {
+    throw new Error(`Static-analysis finding #${index} missing required string field: ${field}`);
+  }
+  return v;
+}
+
+function requireNumber(v: unknown, field: string, index: number): number {
+  if (typeof v !== "number" || Number.isNaN(v)) {
+    throw new Error(`Static-analysis finding #${index} missing required number field: ${field}`);
+  }
+  return v;
+}
+
+function coerceFinding(raw: unknown, index: number): StaticFinding {
+  if (typeof raw !== "object" || raw === null) {
+    throw new Error(`Static-analysis finding #${index} is not an object`);
+  }
+  const r = raw as RawFinding;
+  return {
+    category_id: requireString(r.category_id, "category_id", index),
+    title: requireString(r.title, "title", index),
+    severity: requireSeverity(r.severity, index),
+    description: requireString(r.description, "description", index),
+    root_cause: requireString(r.root_cause, "root_cause", index),
+    impact: requireString(r.impact, "impact", index),
+    remediation: requireString(r.remediation, "remediation", index),
+    matched_context: requireString(r.matched_context, "matched_context", index),
+    cvss_score: requireNumber(r.cvss_score, "cvss_score", index),
+    file_path: r.file_path === null || typeof r.file_path === "string" ? (r.file_path as string | null) : null,
+    line_number: typeof r.line_number === "number" ? r.line_number : null,
+    code_snippet: typeof r.code_snippet === "string" ? r.code_snippet : null,
+  };
 }
 
 async function analyzePromptWithLLM(
   systemPrompt: string,
-  toolsDescription: string
+  toolsDescription: string,
+  model: string,
 ): Promise<StaticFinding[]> {
-  // Skip LLM call if there's nothing to analyze
-  if (!systemPrompt && !toolsDescription) return [];
+  if (!model) throw new Error("analyzePromptWithLLM requires `model` argument");
+  if (!systemPrompt) throw new Error("analyzePromptWithLLM requires non-empty `systemPrompt`");
+  if (!toolsDescription) throw new Error("analyzePromptWithLLM requires non-empty `toolsDescription`");
 
   const userPrompt = buildAnalysisPrompt(systemPrompt, toolsDescription);
 
@@ -208,30 +295,20 @@ async function analyzePromptWithLLM(
       { role: "system", content: ANALYSIS_SYSTEM_PROMPT },
       { role: "user", content: userPrompt },
     ],
-    { temperature: 0.1, maxTokens: 4096, responseFormat: "json_object" }
+    { model, temperature: 0.1, maxTokens: 4096, responseFormat: "json_object" }
   );
 
-  if (!response) return [];
-
-  // Parse JSON from response — handle bare array, {findings:[...]}, or {vulnerabilities:[...]}
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(response);
-    const findings: StaticFinding[] = Array.isArray(parsed)
-      ? parsed
-      : Array.isArray(parsed?.findings)
-      ? parsed.findings
-      : Array.isArray(parsed?.vulnerabilities)
-      ? parsed.vulnerabilities
-      : [];
-
-    return findings.filter((f) => f.category_id && f.severity && f.title);
+    parsed = JSON.parse(response);
   } catch (err) {
-    console.warn("[static-analyzer] Failed to parse LLM response as JSON:", {
-      error: err instanceof Error ? err.message : String(err),
-      responsePreview: response.slice(0, 200),
-    });
-    return [];
+    throw new Error(
+      `Static-analyzer LLM returned malformed JSON: ${err instanceof Error ? err.message : String(err)} | raw=${response.slice(0, 200)}`,
+    );
   }
+
+  const rawFindings = coerceFindingsArray(parsed);
+  return rawFindings.map((f, i) => coerceFinding(f, i));
 }
 
 // ── Scoring ──────────────────────────────────────────────────
@@ -248,7 +325,8 @@ function calculateScore(findings: StaticFinding[]): number {
 
   let deductions = 0;
   for (const f of findings) {
-    deductions += SEVERITY_DEDUCTIONS[f.severity] || 5;
+    // No fallback: severity is already validated by `coerceFinding` via `requireSeverity`.
+    deductions += SEVERITY_DEDUCTIONS[f.severity];
   }
 
   return Math.max(0, Math.min(100, 100 - deductions));
@@ -263,18 +341,28 @@ function calculateScore(findings: StaticFinding[]): number {
  *   1. Structural: regex-based tool definition scanning (fast, no LLM)
  *   2. Semantic: LLM-powered contextual prompt analysis
  *
- * Returns combined findings and a 0-100 security score.
+ * @param systemPrompt     — Required. The agent's system prompt text.
+ * @param toolsDescription — Required. Stringified tool descriptions.
+ * @param tools            — Required. Parsed tool array for structural analysis.
+ * @param model            — Required. Model identifier for the static-analyzer LLM.
+ * @returns                  Combined findings and a 0-100 security score.
  */
 export async function runStaticAnalysis(
   systemPrompt: string,
   toolsDescription: string,
-  tools: { name: string; description: string }[] = []
+  tools: { name: string; description: string }[],
+  model: string,
 ): Promise<StaticResult> {
+  if (!model) throw new Error("runStaticAnalysis requires `model` argument");
+  if (!systemPrompt) throw new Error("runStaticAnalysis requires non-empty `systemPrompt`");
+  if (!toolsDescription) throw new Error("runStaticAnalysis requires non-empty `toolsDescription`");
+  if (!Array.isArray(tools)) throw new Error("runStaticAnalysis requires `tools` array");
+
   // Phase 1: Structural tool analysis
   const structuralFindings = analyzeTools(tools);
 
   // Phase 2: LLM-based semantic analysis
-  const llmFindings = await analyzePromptWithLLM(systemPrompt, toolsDescription);
+  const llmFindings = await analyzePromptWithLLM(systemPrompt, toolsDescription, model);
 
   // Combine: structural findings first, then LLM findings
   const allFindings = [...structuralFindings, ...llmFindings];

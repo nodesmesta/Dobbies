@@ -3,11 +3,16 @@
  *
  * Uses OPENAI_API_KEY from env. Supports custom baseURL
  * for providers like AI/ML API, Fireworks, etc.
+ *
+ * Fail-loud contract:
+ *   - Missing API key         → throw
+ *   - Missing model argument  → throw
+ *   - Non-2xx HTTP response   → throw with status + body
+ *   - Empty/null content      → throw with finish_reason
+ *   - Network/parse errors    → propagate
  */
 
 const BASE_URL = "https://api.fireworks.ai/inference/v1";
-
-const API_KEY = () => process.env.OPENAI_API_KEY ?? "";
 
 export interface ChatMessage {
   role: "system" | "user" | "assistant";
@@ -15,7 +20,7 @@ export interface ChatMessage {
 }
 
 export interface ChatCompletionOptions {
-  model?: string;
+  model: string;
   temperature?: number;
   maxTokens?: number;
   responseFormat?: "json_object";
@@ -23,42 +28,41 @@ export interface ChatCompletionOptions {
 
 /**
  * Sends a chat completion request to an OpenAI-compatible API.
- * Returns the assistant's response text, or null if no API key is configured.
+ * Returns the assistant's response text. Throws on any failure.
  */
 export async function chatCompletion(
   messages: ChatMessage[],
-  options: ChatCompletionOptions = {},
-): Promise<string | null> {
-  const apiKey = API_KEY();
-  if (!apiKey) return null;
+  options: ChatCompletionOptions,
+): Promise<string> {
+  const apiKey = process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error("OPENAI_API_KEY is not configured");
 
-  const {
-    model = "accounts/fireworks/models/minimax-m3",
-    temperature = 0.7,
-    maxTokens = 1024,
-    responseFormat,
-  } = options;
+  const { model, temperature = 0.7, maxTokens = 1024, responseFormat } = options;
+  if (!model) throw new Error("chatCompletion requires `model` option");
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), 60_000);
 
-  const res = await fetch(`${BASE_URL}/chat/completions`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      messages,
-      temperature,
-      max_tokens: maxTokens,
-      ...(responseFormat && { response_format: { type: responseFormat } }),
-    }),
-    signal: controller.signal,
-  });
-
-  clearTimeout(timeoutId);
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}/chat/completions`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        messages,
+        temperature,
+        max_tokens: maxTokens,
+        ...(responseFormat && { response_format: { type: responseFormat } }),
+      }),
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 
   if (!res.ok) {
     const text = await res.text().catch(() => "unknown");
@@ -68,14 +72,20 @@ export async function chatCompletion(
   const json = await res.json();
   const choice = json?.choices?.[0];
   const content = choice?.message?.content;
+
   if (content === null || typeof content === "undefined") {
-    console.warn("[llm-client] Fireworks returned empty content:", {
-      model,
-      finish_reason: choice?.finish_reason,
-      usage: json?.usage,
-      sample: JSON.stringify(json).slice(0, 400),
-    });
-    return null;
+    throw new Error(
+      `LLM returned empty content (model=${model}, finish_reason=${choice?.finish_reason ?? "unknown"})`,
+    );
   }
-  return typeof content === "string" ? content.trim() : null;
+  if (typeof content !== "string") {
+    throw new Error(`LLM returned non-string content: ${typeof content}`);
+  }
+  const trimmed = content.trim();
+  if (trimmed.length === 0) {
+    throw new Error(
+      `LLM returned whitespace-only content (model=${model}, finish_reason=${choice?.finish_reason ?? "unknown"})`,
+    );
+  }
+  return trimmed;
 }

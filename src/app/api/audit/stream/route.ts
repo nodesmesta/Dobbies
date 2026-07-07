@@ -5,12 +5,17 @@
  *
  * Pipeline: RAG Static Analysis → Red-Team Simulation → Evaluator → Save
  *
- * Request:  { agentName, systemPrompt, tools, repoUrl, filePath }
+ * Request:  { agentName, systemPrompt, tools, repoUrl, filePath, content, model? }
  * Response: SSE stream (text/event-stream)
  *   - event: status       → { message }
  *   - event: static_result → { score, vulnerabilities }
  *   - event: chat_turn    → { sender, text, compromised? }
  *   - event: final_result → { dynamicScore, overallScore, reportId, ... }
+ *
+ * Fail-loud contract:
+ *   - Missing required fields throw before SSE starts (HTTP 400).
+ *   - LLM failures throw inside the stream; we emit `event: error` and close.
+ *   - Any silent skip / null-coerce that produces a fake success is removed.
  */
 import { NextRequest } from "next/server";
 import { analyzeWithRAG } from "@/lib/rag";
@@ -24,7 +29,7 @@ import type { Vulnerability, SimulationTurn, GuardrailConfig } from "@/lib/audit
 interface SandboxTurn {
   sender: "attacker" | "agent";
   text: string;
-  compromised?: boolean;
+  compromised: boolean;
   targetVulnId?: string;
   targetVulnTitle?: string;
 }
@@ -34,7 +39,27 @@ interface SandboxResult {
   compromisedTurns: number[];
 }
 
-// ─── SSE helpers ──────────────────────────────────────────────────
+// ─── Audit-time model configuration ──────────────────────────
+// All three LLM roles (attacker, agent simulator, evaluator) MUST
+// use the same model per project convention. Caller can override via
+// request body (model field) or env (AUDIT_MODEL).
+function resolveAuditModel(body: { model?: string }): string {
+  const fromRequest = typeof body.model === "string" && body.model.length > 0
+    ? body.model
+    : undefined;
+  const fromEnv = process.env.AUDIT_MODEL && process.env.AUDIT_MODEL.length > 0
+    ? process.env.AUDIT_MODEL
+    : undefined;
+  const model = fromRequest ?? fromEnv;
+  if (!model) {
+    throw new Error(
+      "No audit LLM model configured. Set `AUDIT_MODEL` env var or pass `model` in request body.",
+    );
+  }
+  return model;
+}
+
+// ─── SSE helpers ──────────────────────────────────────────────
 
 function sseEvent(event: string, data: unknown): string {
   return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
@@ -44,7 +69,7 @@ function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-// ─── Guardrail generation ─────────────────────────────────────────
+// ─── Guardrail generation ─────────────────────────────────────
 
 function generateGuardrails(
   agentName: string,
@@ -136,7 +161,7 @@ rails:
   ];
 }
 
-// ─── Supabase save helpers ────────────────────────────────────────
+// ─── Supabase save helpers ───────────────────────────────────
 
 async function ensureAgent(
   supabase: any,
@@ -187,14 +212,14 @@ async function saveVulnerabilities(
         severity: vuln.severity,
         description: vuln.description,
         remediation: vuln.remediation,
-        file_path: vuln.file_path ?? null,
-        line_number: vuln.line_number ?? null,
-        code_snippet: vuln.code_snippet ?? null,
-        root_cause: vuln.root_cause ?? null,
-        attack_path: vuln.attack_path ?? null,
-        impact: vuln.impact ?? null,
-        cvss_score: vuln.cvss_score ?? null,
-        status: vuln.status ?? "open",
+        file_path: vuln.file_path,
+        line_number: vuln.line_number,
+        code_snippet: vuln.code_snippet,
+        root_cause: vuln.root_cause,
+        attack_path: vuln.attack_path,
+        impact: vuln.impact,
+        cvss_score: vuln.cvss_score,
+        status: vuln.status,
       })
       .select("id")
       .single();
@@ -220,7 +245,6 @@ async function saveSimulationTurns(
 ): Promise<number> {
   let compromisedCount = 0;
   for (const turn of turns) {
-    // Map old vuln ID to new UUID if present
     const mappedVulnId = turn.target_vuln_id ? (vulnIdMap[turn.target_vuln_id] ?? null) : null;
     if (turn.compromised) compromisedCount++;
 
@@ -251,345 +275,311 @@ async function saveGuardrails(
   }
 }
 
-// ─── Route handler ────────────────────────────────────────────────
+// ─── Route handler ────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
+  let body: any;
   try {
-    if (!process.env.OPENAI_API_KEY) {
-      return new Response(
-        sseEvent("error", { message: "OPENAI_API_KEY is not configured. AI vs AI auditing requires an active OpenAI API key." }),
-        { status: 400, headers: { "Content-Type": "text/event-stream" } }
-      );
-    }
+    body = await request.json();
+  } catch (err) {
+    return new Response(
+      sseEvent("error", { message: `Invalid JSON body: ${err instanceof Error ? err.message : String(err)}` }),
+      { status: 400, headers: { "Content-Type": "text/event-stream" } }
+    );
+  }
 
-    const { agentName, systemPrompt, tools, repoUrl, filePath, content } = await request.json();
+  const { agentName, systemPrompt, tools, repoUrl, filePath, content, model: modelBody } = body;
 
-    // Use content as fallback if systemPrompt is empty
-    const prompt = systemPrompt || content || "";
+  // Required input validation
+  if (typeof agentName !== "string" || agentName.length === 0) {
+    return new Response(
+      sseEvent("error", { message: "agentName is required (non-empty string)" }),
+      { status: 400, headers: { "Content-Type": "text/event-stream" } }
+    );
+  }
 
-    if (!agentName) {
-      return new Response(
-        sseEvent("error", { message: "agentName is required" }),
-        { status: 400, headers: { "Content-Type": "text/event-stream" } }
-      );
-    }
+  const prompt = typeof systemPrompt === "string" && systemPrompt.length > 0
+    ? systemPrompt
+    : typeof content === "string" && content.length > 0
+      ? content
+      : undefined;
+  if (!prompt) {
+    return new Response(
+      sseEvent("error", { message: "systemPrompt or content is required (non-empty string)" }),
+      { status: 400, headers: { "Content-Type": "text/event-stream" } }
+    );
+  }
 
-    const toolList: DetectedAgentTool[] = tools ?? [];
-    const toolNames = toolList.map((t: DetectedAgentTool) => t.name);
-    const toolsDescription = toolList
-      .map((t: DetectedAgentTool) => `${t.name}: ${t.description}`)
-      .join("\n");
+  if (!Array.isArray(tools)) {
+    return new Response(
+      sseEvent("error", { message: "tools must be an array" }),
+      { status: 400, headers: { "Content-Type": "text/event-stream" } }
+    );
+  }
 
-    // ── Streaming response ───────────────────────────────────────
-    const encoder = new TextEncoder();
-    const stream = new ReadableStream({
-      async start(controller) {
-        const t0 = Date.now();
-        const reportId = `audit-${t0}`;
-        const trace = (msg: string) => console.log(`[audit-stream:${reportId}] ${Date.now() - t0}ms ${msg}`);
-        try {
-          trace(`pipeline start for agent="${agentName}" tools=${toolNames.length}`);
+  let auditModel: string;
+  try {
+    auditModel = resolveAuditModel({ model: modelBody });
+  } catch (err) {
+    return new Response(
+      sseEvent("error", { message: err instanceof Error ? err.message : String(err) }),
+      { status: 400, headers: { "Content-Type": "text/event-stream" } }
+    );
+  }
 
-          // ── PHASE 1: RAG Static Analysis ──────────────────────
+  const toolList: DetectedAgentTool[] = tools;
+  const toolNames = toolList.map((t) => t.name);
+  const toolsDescription = toolList
+    .map((t) => `${t.name}: ${t.description}`)
+    .join("\n");
+
+  // ── Streaming response ───────────────────────────────────────
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      const t0 = Date.now();
+      const reportId = `audit-${t0}`;
+      const trace = (msg: string) => console.log(`[audit-stream:${reportId}] ${Date.now() - t0}ms ${msg}`);
+      try {
+        trace(`pipeline start for agent="${agentName}" tools=${toolNames.length} model=${auditModel}`);
+
+        // ── PHASE 1: RAG Static Analysis ──────────────────────
+        controller.enqueue(encoder.encode(
+          sseEvent("status", { message: `Initializing audit pipeline for "${agentName}"...` })
+        ));
+        await delay(300);
+
+        controller.enqueue(encoder.encode(
+          sseEvent("status", { message: `Analyzing agent architecture for "${agentName}"...` })
+        ));
+        await delay(300);
+
+        controller.enqueue(encoder.encode(
+          sseEvent("status", { message: `Scanning ${toolNames.length} tool definition${toolNames.length !== 1 ? "s" : ""} for dangerous operations...` })
+        ));
+        await delay(300);
+
+        controller.enqueue(encoder.encode(
+          sseEvent("status", { message: "Performing LLM-based semantic analysis of system prompt..." })
+        ));
+        await delay(400);
+
+        const t_phase1 = Date.now();
+        trace(`analyzeWithRAG start`);
+        const ragResult = await analyzeWithRAG(prompt, toolsDescription, toolList, auditModel);
+        const staticScore = ragResult.score;
+        const vulnerabilities = ragResult.vulnerabilities;
+        trace(`analyzeWithRAG done in ${Date.now() - t_phase1}ms → score=${staticScore} vulns=${vulnerabilities.length}`);
+
+        controller.enqueue(encoder.encode(
+          sseEvent("static_result", {
+            score: staticScore,
+            vulnerabilities,
+            message: `Static analysis complete — ${vulnerabilities.length} vulnerabilities detected`,
+          })
+        ));
+
+        // ── PHASE 2: Red-Team Simulation ──────────────────────
+        controller.enqueue(encoder.encode(
+          sseEvent("status", { message: "Starting automated red-teaming simulation..." })
+        ));
+        await delay(400);
+
+        controller.enqueue(encoder.encode(
+          sseEvent("status", { message: "Attacker LLM initialized — probing with adversarial prompts..." })
+        ));
+        await delay(300);
+
+        const fullTranscript: SandboxTurn[] = [];
+
+        const numTurns = Math.max(2, Math.min(vulnerabilities.length, 10));
+        trace(`phase 2 start: red-team loop numTurns=${numTurns}`);
+
+        for (let turnNum = 0; turnNum < numTurns; turnNum++) {
+          const t_turn = Date.now();
+          const targetVuln = turnNum < vulnerabilities.length
+            ? vulnerabilities[turnNum]
+            : vulnerabilities[vulnerabilities.length - 1];
+          trace(`turn ${turnNum + 1}/${numTurns} start → target: ${targetVuln?.title?.slice(0,40) || "(none)"}`);
+
+          const t_attack = Date.now();
+          // Any LLM failure here throws → caught by outer try → SSE error event.
+          const attackText = await generateAttack(
+            prompt,
+            toolList,
+            fullTranscript,
+            vulnerabilities,
+            targetVuln,
+            auditModel,
+          );
+          trace(`turn ${turnNum + 1} generateAttack LLM took ${Date.now() - t_attack}ms`);
+
+          await delay(500);
           controller.enqueue(encoder.encode(
-            sseEvent("status", { message: `Initializing audit pipeline for "${agentName}"...` })
-          ));
-          await delay(300);
-
-          controller.enqueue(encoder.encode(
-            sseEvent("status", { message: `Analyzing agent architecture for "${agentName}"...` })
-          ));
-          await delay(300);
-
-          controller.enqueue(encoder.encode(
-            sseEvent("status", { message: `Scanning ${toolNames.length} tool definition${toolNames.length !== 1 ? "s" : ""} for dangerous operations...` })
-          ));
-          await delay(300);
-
-          controller.enqueue(encoder.encode(
-            sseEvent("status", { message: "Performing LLM-based semantic analysis of system prompt..." })
-          ));
-          await delay(400);
-
-          // Run LLM-based static analysis (async)
-          const t_phase1 = Date.now();
-          trace(`analyzeWithRAG start`);
-          const ragResult = await analyzeWithRAG(prompt, toolsDescription, toolList);
-          const staticScore = ragResult.score;
-          const vulnerabilities = ragResult.vulnerabilities;
-          trace(`analyzeWithRAG done in ${Date.now() - t_phase1}ms → score=${staticScore} vulns=${vulnerabilities.length}`);
-
-          controller.enqueue(encoder.encode(
-            sseEvent("static_result", {
-              score: staticScore,
-              vulnerabilities,
-              message: `Static analysis complete — ${vulnerabilities.length} vulnerabilities detected`,
-            })
-          ));
-
-          // ── PHASE 2: Red-Team Simulation ──────────────────────
-          controller.enqueue(encoder.encode(
-            sseEvent("status", { message: "Starting automated red-teaming simulation..." })
-          ));
-          await delay(400);
-
-          controller.enqueue(encoder.encode(
-            sseEvent("status", { message: "Attacker LLM initialized — probing with adversarial prompts..." })
-          ));
-          await delay(300);
-
-          // Variables to track simulation state
-          let sandboxResult: SandboxResult;
-          const fullTranscript: SandboxTurn[] = [];
-
-          // ── LLM-Powered Attacker ──
-          // Each turn: LLM generates attacker prompt → LLM simulates agent response
-          // Dynamic turns: 1 attack per vulnerability, min 2, max 10
-          const numTurns = Math.max(2, Math.min(vulnerabilities.length, 10));
-          trace(`phase 2 start: red-team loop numTurns=${numTurns}`);
-
-          for (let turnNum = 0; turnNum < numTurns; turnNum++) {
-            const t_turn = Date.now();
-            // Generate attacker prompt via LLM — target 1 vulnerability per turn
-            const targetVuln = turnNum < vulnerabilities.length
-              ? vulnerabilities[turnNum]
-              : vulnerabilities[vulnerabilities.length - 1]; // fallback: repeat last vuln
-            trace(`turn ${turnNum + 1}/${numTurns} start → target: ${targetVuln?.title?.slice(0,40) || "(none)"}`);
-
-            const t_attack = Date.now();
-            const attackerMsg = await generateAttack(
-              prompt,
-              toolList,
-              fullTranscript,
-              vulnerabilities,
-              targetVuln,
-            );
-            trace(`turn ${turnNum + 1} generateAttack LLM took ${Date.now() - t_attack}ms`);
-
-            if (!attackerMsg) {
-              throw new Error("Attacker LLM failed to generate attack — aborting simulation");
-            }
-            const attackText = attackerMsg;
-
-            // Stream attacker message
-            await delay(500);
-            controller.enqueue(encoder.encode(
-              sseEvent("chat_turn", {
-                sender: "attacker",
-                text: attackText,
-                targetVulnId: targetVuln?.id,
-                targetVulnTitle: targetVuln?.title,
-              })
-            ));
-            fullTranscript.push({
+            sseEvent("chat_turn", {
               sender: "attacker",
               text: attackText,
               targetVulnId: targetVuln?.id,
               targetVulnTitle: targetVuln?.title,
-            });
-
-            // Simulate agent response using Agent LLM
-            const t_agent = Date.now();
-            let agentText: string | null = null;
-            try {
-              agentText = await generateAgentResponse(prompt, toolList, fullTranscript);
-              trace(`turn ${turnNum + 1} generateAgentResponse LLM took ${Date.now() - t_agent}ms`);
-            } catch (err) {
-              trace(`turn ${turnNum + 1} generateAgentResponse FAILED: ${err instanceof Error ? err.message : String(err)}`);
-            }
-            if (!agentText) {
-              // LLM unavailable for this turn — record as inconclusive and continue.
-              // Frontend gets a final_result when loop completes; this turn won't falsely
-              // count as compromise so the evaluator can still produce a meaningful score.
-              fullTranscript.push({
-                sender: "agent",
-                text: "[Agent LLM unavailable for this turn — agent simulator returned no content]",
-                compromised: undefined,
-              });
-              await delay(400);
-              controller.enqueue(encoder.encode(
-                sseEvent("chat_turn", {
-                  sender: "agent",
-                  text: "[Agent LLM unavailable — see server logs]",
-                  compromised: false,
-                })
-              ));
-              continue;
-            }
-            // Compromise flag will be determined by evaluator LLM at Phase 3
-            const isCompromised = false;
-
-            // Stream agent response
-            await delay(800);
-            controller.enqueue(encoder.encode(
-              sseEvent("chat_turn", {
-                sender: "agent",
-                text: agentText,
-                compromised: isCompromised,
-              })
-            ));
-            fullTranscript.push({
-              sender: "agent",
-              text: agentText,
-              compromised: isCompromised,
-            });
-            trace(`turn ${turnNum + 1} complete in ${Date.now() - t_turn}ms total`);
-          }
-
-          sandboxResult = {
-            turns: fullTranscript,
-            compromisedTurns: [],
-          };
-
-          // ── PHASE 3: Scorer & Guardrails ──────────────────────
-          await delay(300);
-          controller.enqueue(encoder.encode(
-            sseEvent("status", { message: "Running AI Security Evaluator on transcript..." })
-          ));
-
-          let dynamicScore: number;
-          let evaluationRisks: string[] = [];
-          let evaluationRecommendations: string[] = [];
-
-          trace(`phase 3 start: evaluator LLM`);
-          const t_eval = Date.now();
-          // LLM-Powered Evaluator for nuanced scoring
-          const evalResult = await evaluateTranscript(
-            agentName,
-            prompt,
-            sandboxResult.turns,
-          );
-          trace(`evaluator LLM completed in ${Date.now() - t_eval}ms`);
-          if (!evalResult) {
-            throw new Error("Evaluator LLM failed to analyze transcript — aborting scoring");
-          }
-          dynamicScore = evalResult.dynamicScore;
-          evaluationRisks = evalResult.risks;
-          evaluationRecommendations = evalResult.recommendations;
-
-          // Apply compromised turns from evaluator LLM
-          const evaluatorCompromised: number[] = [];
-          if (evalResult.compromisedTurns.length > 0) {
-            for (const turnNum of evalResult.compromisedTurns) {
-              const transcriptIdx = turnNum - 1; // 1-based → 0-based
-              if (transcriptIdx >= 0 && transcriptIdx < fullTranscript.length) {
-                fullTranscript[transcriptIdx].compromised = true;
-                evaluatorCompromised.push(Math.ceil((transcriptIdx + 1) / 2)); // Convert to round number
-              }
-            }
-          }
-
-          if (evaluatorCompromised.length > 0) {
-            controller.enqueue(encoder.encode(
-              sseEvent("status", {
-                message: `⚠ Agent compromised on turn(s) ${evaluatorCompromised.join(", ")}`,
-              })
-            ));
-          }
-          const overallScore = Math.round((staticScore + dynamicScore) / 2);
-
-          // ── Combine vulnerabilities ──
-          const allVulnerabilities = vulnerabilities;
-
-          const guardrails = generateGuardrails(agentName, allVulnerabilities);
-
-          const simulationLogs: SimulationTurn[] = sandboxResult.turns.map((turn, i) => ({
-            id: `turn-${i}`,
-            turn_number: i + 1,
-            sender: turn.sender,
-            text: turn.text,
-            compromised: turn.compromised ?? false,
-            target_vuln_id: turn.targetVulnId ?? null,
-          }));
-
-          // ── Save to Supabase (normalized tables) ──────────────
-          try {
-            const supabase = await createClient();
-            const { data: { session } } = await supabase.auth.getSession();
-
-            if (session?.user) {
-              // 1. Ensure agent record exists
-              const agentId = await ensureAgent(supabase, session.user.id, agentName, repoUrl ?? null, toolList);
-
-              // 2. Insert audit report
-              await supabase.from("audit_reports").insert({
-                id: reportId,
-                user_id: session.user.id,
-                agent_id: agentId,
-                agent_name: agentName,
-                repo_url: repoUrl ?? null,
-                file_path: filePath ?? null,
-                system_prompt: prompt,
-                tools_json: JSON.stringify(toolList),
-                static_score: staticScore,
-                dynamic_score: dynamicScore,
-                overall_score: overallScore,
-                status: "completed",
-              });
-
-              // 3. Save vulnerabilities + get ID mapping + counts
-              const { idMap, counts } = await saveVulnerabilities(supabase, reportId, allVulnerabilities);
-
-              // 4. Save simulation turns
-              const compromisedCount = await saveSimulationTurns(supabase, reportId, simulationLogs, idMap);
-
-              // 5. Save guardrails
-              await saveGuardrails(supabase, reportId, guardrails);
-
-              // 6. Update denormalized counts on the report
-              await supabase
-                .from("audit_reports")
-                .update({
-                  vulnerability_count: counts.vulnerability_count,
-                  critical_count: counts.critical_count,
-                  high_count: counts.high_count,
-                  medium_count: counts.medium_count,
-                  low_count: counts.low_count,
-                  compromised_count: compromisedCount,
-                })
-                .eq("id", reportId);
-            }
-          } catch {
-            // No Supabase configured — skip saving
-          }
-
-          // ── Final result ──────────────────────────────────────
-          controller.enqueue(encoder.encode(
-            sseEvent("final_result", {
-              reportId,
-              agentName,
-              staticScore,
-              dynamicScore,
-              overallScore,
-              vulnerabilities: allVulnerabilities,
-              simulationLogs,
-              guardrails,
             })
           ));
+          fullTranscript.push({
+            sender: "attacker",
+            text: attackText,
+            compromised: false,
+            targetVulnId: targetVuln?.id,
+            targetVulnTitle: targetVuln?.title,
+          });
 
-          controller.close();
-          trace(`pipeline complete: total ${Date.now() - t0}ms | final_result emitted`);
-        } catch (err) {
-          const message = err instanceof Error ? err.message : "Pipeline error";
-          trace(`PIPELINE ERROR after ${Date.now() - t0}ms: ${message}`);
-          controller.enqueue(encoder.encode(sseEvent("error", { message })));
-          controller.close();
+          const t_agent = Date.now();
+          const agentText = await generateAgentResponse(prompt, toolList, fullTranscript, auditModel);
+          trace(`turn ${turnNum + 1} generateAgentResponse LLM took ${Date.now() - t_agent}ms`);
+
+          // Compromised flag is determined later by evaluator LLM at Phase 3.
+          // Initial value false is a known state, not a guess.
+          fullTranscript.push({
+            sender: "agent",
+            text: agentText,
+            compromised: false,
+          });
+
+          await delay(800);
+          controller.enqueue(encoder.encode(
+            sseEvent("chat_turn", {
+              sender: "agent",
+              text: agentText,
+              compromised: false,
+            })
+          ));
+          trace(`turn ${turnNum + 1} complete in ${Date.now() - t_turn}ms total`);
         }
-      },
-    });
 
-    return new Response(stream, {
-      headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
-      },
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Invalid request";
-    return new Response(
-      sseEvent("error", { message }),
-      { status: 400, headers: { "Content-Type": "text/event-stream" } }
-    );
-  }
+        // ── PHASE 3: Scorer & Guardrails ──────────────────────
+        await delay(300);
+        controller.enqueue(encoder.encode(
+          sseEvent("status", { message: "Running AI Security Evaluator on transcript..." })
+        ));
+
+        let dynamicScore: number;
+        let evaluationRisks: string[];
+        let evaluationRecommendations: string[];
+
+        trace(`phase 3 start: evaluator LLM`);
+        const t_eval = Date.now();
+        const evalResult = await evaluateTranscript(
+          agentName,
+          prompt,
+          fullTranscript,
+          auditModel,
+        );
+        trace(`evaluator LLM completed in ${Date.now() - t_eval}ms`);
+        dynamicScore = evalResult.dynamicScore;
+        evaluationRisks = evalResult.risks;
+        evaluationRecommendations = evalResult.recommendations;
+
+        // Apply compromised turns from evaluator LLM
+        const evaluatorCompromised: number[] = [];
+        if (evalResult.compromisedTurns.length > 0) {
+          for (const turnNum of evalResult.compromisedTurns) {
+            const transcriptIdx = turnNum - 1; // 1-based → 0-based
+            if (transcriptIdx >= 0 && transcriptIdx < fullTranscript.length) {
+              fullTranscript[transcriptIdx].compromised = true;
+              evaluatorCompromised.push(Math.ceil((transcriptIdx + 1) / 2)); // Convert to round number
+            }
+          }
+        }
+
+        if (evaluatorCompromised.length > 0) {
+          controller.enqueue(encoder.encode(
+            sseEvent("status", {
+              message: `⚠ Agent compromised on turn(s) ${evaluatorCompromised.join(", ")}`,
+            })
+          ));
+        }
+        const overallScore = Math.round((staticScore + dynamicScore) / 2);
+
+        const allVulnerabilities = vulnerabilities;
+
+        const guardrails = generateGuardrails(agentName, allVulnerabilities);
+
+        const simulationLogs: SimulationTurn[] = fullTranscript.map((turn, i) => ({
+          id: `turn-${i}`,
+          turn_number: i + 1,
+          sender: turn.sender,
+          text: turn.text,
+          compromised: turn.compromised,
+          target_vuln_id: turn.targetVulnId ?? null,
+        }));
+
+        // ── Save to Supabase (normalized tables) ──────────────
+        const supabase = await createClient();
+        const { data: { session } } = await supabase.auth.getSession();
+
+        if (session?.user) {
+          const agentId = await ensureAgent(supabase, session.user.id, agentName, repoUrl ?? null, toolList);
+
+          await supabase.from("audit_reports").insert({
+            id: reportId,
+            user_id: session.user.id,
+            agent_id: agentId,
+            agent_name: agentName,
+            repo_url: repoUrl ?? null,
+            file_path: filePath ?? null,
+            system_prompt: prompt,
+            tools_json: JSON.stringify(toolList),
+            static_score: staticScore,
+            dynamic_score: dynamicScore,
+            overall_score: overallScore,
+            status: "completed",
+          });
+
+          const { idMap, counts } = await saveVulnerabilities(supabase, reportId, allVulnerabilities);
+          const compromisedCount = await saveSimulationTurns(supabase, reportId, simulationLogs, idMap);
+          await saveGuardrails(supabase, reportId, guardrails);
+
+          await supabase
+            .from("audit_reports")
+            .update({
+              vulnerability_count: counts.vulnerability_count,
+              critical_count: counts.critical_count,
+              high_count: counts.high_count,
+              medium_count: counts.medium_count,
+              low_count: counts.low_count,
+              compromised_count: compromisedCount,
+            })
+            .eq("id", reportId);
+        }
+
+        // ── Final result ──────────────────────────────────────
+        controller.enqueue(encoder.encode(
+          sseEvent("final_result", {
+            reportId,
+            agentName,
+            staticScore,
+            dynamicScore,
+            overallScore,
+            vulnerabilities: allVulnerabilities,
+            simulationLogs,
+            guardrails,
+          })
+        ));
+
+        controller.close();
+        trace(`pipeline complete: total ${Date.now() - t0}ms | final_result emitted`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "Pipeline error";
+        trace(`PIPELINE ERROR after ${Date.now() - t0}ms: ${message}`);
+        controller.enqueue(encoder.encode(sseEvent("error", { message })));
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  });
 }

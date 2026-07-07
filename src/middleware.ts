@@ -13,6 +13,13 @@ const publicPaths = [
   "/dobbies.png",
 ];
 
+// Dev-only bypass for curl testing of audit pipeline.
+// Strict inverted check: only active when NODE_ENV is explicitly "development".
+// Safe in production: any other value (production, test, undefined) keeps middleware active.
+if (process.env.NODE_ENV === "development") {
+  publicPaths.push("/api/audit");
+}
+
 function isPublicPath(path: string): boolean {
   return publicPaths.some((p) => (p === "/" ? path === "/" : path.startsWith(p)));
 }

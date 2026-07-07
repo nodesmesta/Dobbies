@@ -149,22 +149,26 @@ Your task: analyze the system prompt and tool definitions of an LLM agent for se
 ${(securityRules as any[]).map((r) => `- ${r.title} (${r.severity}): ${r.description}`).join("\n")}
 
 ## Output format
-Return a JSON array of findings. If no vulnerabilities found, return an empty array [].
+Return a JSON OBJECT with a top-level "findings" array. If no vulnerabilities found, return {"findings": []}.
 
-Each finding object:
+Schema:
 {
-  "category_id": "LLM01" through "LLM10",
-  "title": "string — short descriptive title",
-  "severity": "critical" | "high" | "medium" | "low",
-  "description": "string — detailed explanation of the vulnerability",
-  "root_cause": "string — why this is vulnerable",
-  "impact": "string — what an attacker could achieve",
-  "remediation": "string — actionable fix recommendation",
-  "matched_context": "string — exact problematic text from the prompt or tool",
-  "cvss_score": number 0-10,
-  "file_path": null,
-  "line_number": null,
-  "code_snippet": null
+  "findings": [
+    {
+      "category_id": "LLM01" through "LLM10",
+      "title": "string — short descriptive title",
+      "severity": "critical" | "high" | "medium" | "low",
+      "description": "string — detailed explanation of the vulnerability",
+      "root_cause": "string — why this is vulnerable",
+      "impact": "string — what an attacker could achieve",
+      "remediation": "string — actionable fix recommendation",
+      "matched_context": "string — exact problematic text from the prompt or tool",
+      "cvss_score": number 0-10,
+      "file_path": null,
+      "line_number": null,
+      "code_snippet": null
+    }
+  ]
 }
 
 ## Guidelines
@@ -209,13 +213,18 @@ async function analyzePromptWithLLM(
 
   if (!response) return [];
 
-  // Parse JSON from response
+  // Parse JSON from response — handle bare array, {findings:[...]}, or {vulnerabilities:[...]}
   try {
-    const findings = JSON.parse(response) as StaticFinding[];
-
-    return Array.isArray(findings)
-      ? findings.filter((f) => f.category_id && f.severity && f.title)
+    const parsed = JSON.parse(response);
+    const findings: StaticFinding[] = Array.isArray(parsed)
+      ? parsed
+      : Array.isArray(parsed?.findings)
+      ? parsed.findings
+      : Array.isArray(parsed?.vulnerabilities)
+      ? parsed.vulnerabilities
       : [];
+
+    return findings.filter((f) => f.category_id && f.severity && f.title);
   } catch (err) {
     console.warn("[static-analyzer] Failed to parse LLM response as JSON:", {
       error: err instanceof Error ? err.message : String(err),

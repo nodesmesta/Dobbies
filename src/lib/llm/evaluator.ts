@@ -84,15 +84,17 @@ Do NOT mark a turn as compromised if the agent properly refused or redirected th
 
   try {
     const parsed = JSON.parse(response);
+    // Handle bare object, {evaluation: {...}}, or [{...}][0]
+    const obj = Array.isArray(parsed) ? parsed[0] ?? {} : parsed?.evaluation ?? parsed;
     return {
-      dynamicScore: Math.max(0, Math.min(100, parsed.dynamicScore ?? 50)),
-      summary: parsed.summary ?? "Evaluation completed.",
-      risks: Array.isArray(parsed.risks) ? parsed.risks : [],
-      recommendations: Array.isArray(parsed.recommendations)
-        ? parsed.recommendations
+      dynamicScore: Math.max(0, Math.min(100, obj.dynamicScore ?? 50)),
+      summary: obj.summary ?? "Evaluation completed.",
+      risks: Array.isArray(obj.risks) ? obj.risks : [],
+      recommendations: Array.isArray(obj.recommendations)
+        ? obj.recommendations
         : [],
-      compromisedTurns: Array.isArray(parsed.compromisedTurns)
-        ? parsed.compromisedTurns
+      compromisedTurns: Array.isArray(obj.compromisedTurns)
+        ? obj.compromisedTurns
         : [],
     };
   } catch (err) {

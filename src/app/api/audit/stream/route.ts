@@ -31,7 +31,9 @@ interface SandboxTurn {
   text: string;
   compromised: boolean;
   targetVulnId?: string;
-  targetVulnTitle?: string;
+  targetVulnTitle?: string | null;
+  /** OWASP category this turn's session belongs to */
+  sessionCategory?: string;
 }
 
 interface SandboxResult {
@@ -260,6 +262,7 @@ async function saveSimulationTurns(
       text: turn.text,
       target_vuln_id: mappedVulnId,
       compromised: turn.compromised ?? false,
+      session_category: turn.session_category ?? null,
     });
   }
   return compromisedCount;
@@ -555,128 +558,191 @@ export async function POST(request: NextRequest) {
           })
         ));
 
-        // ── PHASE 2: Red-Team Simulation ──────────────────────
+        // ── PHASE 2: Red-Team Simulation (Per-OWASP-Category Sessions) ──
         controller.enqueue(encoder.encode(
           sseEvent("status", { message: "Starting automated red-teaming simulation..." })
         ));
         await delay(400);
 
-        controller.enqueue(encoder.encode(
-          sseEvent("status", { message: "Attacker LLM initialized — probing with adversarial prompts..." })
-        ));
-        await delay(300);
+        const CATEGORY_LABELS: Record<string, string> = {
+          LLM01: "Prompt Injection",
+          LLM02: "Insecure Output Handling",
+          LLM03: "Training Data Poisoning",
+          LLM04: "Model DoS",
+          LLM05: "Supply Chain",
+          LLM06: "Sensitive Info Disclosure",
+          LLM07: "Insecure Plugin Design",
+          LLM08: "Excessive Agency",
+          LLM09: "Overreliance",
+          LLM10: "Model Theft",
+        };
+
+        // Group vulnerabilities by OWASP category
+        const byCategory = new Map<string, Vulnerability[]>();
+        for (const v of vulnerabilities) {
+          if (!byCategory.has(v.category_id)) byCategory.set(v.category_id, []);
+          byCategory.get(v.category_id)!.push(v);
+        }
+
+        trace(`phase 2 start: ${byCategory.size} OWASP categories → per-category sessions (3 turns each)`);
 
         const fullTranscript: SandboxTurn[] = [];
+        const sessionScores: number[] = [];
+        const sessionResults: { category: string; score: number; compromisedLocal: number[] }[] = [];
+        let allCompromisedCount = 0;
 
-        const numTurns = Math.max(2, Math.min(vulnerabilities.length, 10));
-        trace(`phase 2 start: red-team loop numTurns=${numTurns}`);
+        for (const [categoryId, categoryVulns] of byCategory) {
+          const label = CATEGORY_LABELS[categoryId] ?? categoryId;
 
-        for (let turnNum = 0; turnNum < numTurns; turnNum++) {
-          const t_turn = Date.now();
-          const targetVuln = turnNum < vulnerabilities.length
-            ? vulnerabilities[turnNum]
-            : vulnerabilities[vulnerabilities.length - 1];
-          trace(`turn ${turnNum + 1}/${numTurns} start → target: ${targetVuln?.title?.slice(0,40) || "(none)"}`);
-
-          const t_attack = Date.now();
-          // Any LLM failure here throws → caught by outer try → SSE error event.
-          const attackText = await generateAttack(
-            prompt,
-            toolList,
-            fullTranscript,
-            vulnerabilities,
-            targetVuln,
-            modelBody,
-          );
-          trace(`turn ${turnNum + 1} generateAttack LLM took ${Date.now() - t_attack}ms`);
-
-          await delay(500);
+          // SSE: session start
           controller.enqueue(encoder.encode(
-            sseEvent("chat_turn", {
-              sender: "attacker",
-              text: attackText,
-              targetVulnId: targetVuln?.id,
-              targetVulnTitle: targetVuln?.title,
+            sseEvent("status", {
+              message: `⚔️ [${categoryId}] ${label}: Starting 3-turn red-team simulation...`,
+              session_category: categoryId,
+              session_name: label,
             })
           ));
-          fullTranscript.push({
-            sender: "attacker",
-            text: attackText,
-            compromised: false,
-            targetVulnId: targetVuln?.id,
-            targetVulnTitle: targetVuln?.title,
-          });
+          await delay(400);
 
-          const t_agent = Date.now();
-          const agentText = await generateAgentResponse(prompt, toolList, fullTranscript, modelBody);
-          trace(`turn ${turnNum + 1} generateAgentResponse LLM took ${Date.now() - t_agent}ms`);
+          const sessionTranscript: SandboxTurn[] = [];
 
-          // Compromised flag is determined later by evaluator LLM at Phase 3.
-          // Initial value false is a known state, not a guess.
-          // Both attacker and agent turns in the same "attack attempt" point
-          // at the same target vuln so the post-simulation verdict can map
-          // successful compromises back to the specific finding.
-          fullTranscript.push({
-            sender: "agent",
-            text: agentText,
-            compromised: false,
-            targetVulnId: targetVuln?.id ?? null,
-            targetVulnTitle: targetVuln?.title ?? null,
-          });
+          for (let i = 0; i < 3; i++) {
+            const targetVuln = categoryVulns[i % categoryVulns.length];
+            const t_turn = Date.now();
+            trace(`[${categoryId}] turn ${i + 1}/3 → target: ${targetVuln?.title?.slice(0, 40) || "(none)"}`);
 
-          await delay(800);
-          controller.enqueue(encoder.encode(
-            sseEvent("chat_turn", {
+            // Attacker turn
+            const t_attack = Date.now();
+            const attackText = await generateAttack(
+              prompt,
+              toolList,
+              sessionTranscript,
+              categoryVulns,
+              targetVuln,
+              modelBody,
+            );
+            trace(`[${categoryId}] turn ${i + 1} generateAttack took ${Date.now() - t_attack}ms`);
+
+            await delay(500);
+            controller.enqueue(encoder.encode(
+              sseEvent("chat_turn", {
+                sender: "attacker",
+                text: attackText,
+                targetVulnId: targetVuln?.id,
+                targetVulnTitle: targetVuln?.title,
+                sessionCategory: categoryId,
+              })
+            ));
+            sessionTranscript.push({
+              sender: "attacker",
+              text: attackText,
+              compromised: false,
+              targetVulnId: targetVuln?.id,
+              targetVulnTitle: targetVuln?.title,
+              sessionCategory: categoryId,
+            });
+
+            // Agent turn
+            const t_agent = Date.now();
+            const agentText = await generateAgentResponse(prompt, toolList, sessionTranscript, modelBody);
+            trace(`[${categoryId}] turn ${i + 1} generateAgentResponse took ${Date.now() - t_agent}ms`);
+
+            // Compromised flag is determined later by evaluator LLM.
+            // Initial value false is a known state, not a guess.
+            sessionTranscript.push({
               sender: "agent",
               text: agentText,
               compromised: false,
-            })
-          ));
-          trace(`turn ${turnNum + 1} complete in ${Date.now() - t_turn}ms total`);
-        }
+              targetVulnId: targetVuln?.id ?? null,
+              targetVulnTitle: targetVuln?.title ?? null,
+              sessionCategory: categoryId,
+            });
 
-        // ── PHASE 3: Scorer & Guardrails ──────────────────────
-        await delay(300);
-        controller.enqueue(encoder.encode(
-          sseEvent("status", { message: "Running AI Security Evaluator on transcript..." })
-        ));
+            await delay(800);
+            controller.enqueue(encoder.encode(
+              sseEvent("chat_turn", {
+                sender: "agent",
+                text: agentText,
+                compromised: false,
+                sessionCategory: categoryId,
+              })
+            ));
+            trace(`[${categoryId}] turn ${i + 1}/3 complete in ${Date.now() - t_turn}ms`);
+          }
 
-        let dynamicScore: number;
-        let evaluationRisks: string[];
-        let evaluationRecommendations: string[];
+          // Evaluate this session independently
+          const t_eval = Date.now();
+          trace(`[${categoryId}] evaluating session transcript...`);
+          const sessionEval = await evaluateTranscript(agentName, prompt, sessionTranscript, modelBody);
+          trace(`[${categoryId}] evaluator done in ${Date.now() - t_eval}ms → score=${sessionEval.dynamicScore}`);
 
-        trace(`phase 3 start: evaluator LLM`);
-        const t_eval = Date.now();
-        const evalResult = await evaluateTranscript(
-          agentName,
-          prompt,
-          fullTranscript,
-          modelBody,
-        );
-        trace(`evaluator LLM completed in ${Date.now() - t_eval}ms`);
-        dynamicScore = evalResult.dynamicScore;
-        evaluationRisks = evalResult.risks;
-        evaluationRecommendations = evalResult.recommendations;
-
-        // Apply compromised turns from evaluator LLM
-        const evaluatorCompromised: number[] = [];
-        if (evalResult.compromisedTurns.length > 0) {
-          for (const turnNum of evalResult.compromisedTurns) {
-            const transcriptIdx = turnNum - 1; // 1-based → 0-based
-            if (transcriptIdx >= 0 && transcriptIdx < fullTranscript.length) {
-              fullTranscript[transcriptIdx].compromised = true;
-              evaluatorCompromised.push(Math.ceil((transcriptIdx + 1) / 2)); // Convert to round number
+          // Mark compromised turns in this session's transcript
+          for (const localTurnNum of sessionEval.compromisedTurns) {
+            const idx = localTurnNum - 1;
+            if (idx >= 0 && idx < sessionTranscript.length) {
+              sessionTranscript[idx].compromised = true;
             }
           }
-        }
 
-        if (evaluatorCompromised.length > 0) {
+          // Track agent-compromised count for this session
+          const agentCompromisedLocal = sessionEval.compromisedTurns.filter(
+            n => sessionTranscript[n - 1]?.sender === "agent"
+          ).length;
+          allCompromisedCount += agentCompromisedLocal;
+
+          sessionScores.push(sessionEval.dynamicScore);
+          sessionResults.push({
+            category: categoryId,
+            score: sessionEval.dynamicScore,
+            compromisedLocal: sessionEval.compromisedTurns,
+          });
+
+          // SSE: session result
+          const compromisedMsg = sessionEval.compromisedTurns.length > 0
+            ? `⚠ ${sessionEval.compromisedTurns.length} turn(s) compromised`
+            : "no compromise";
           controller.enqueue(encoder.encode(
             sseEvent("status", {
-              message: `⚠ Agent compromised on turn(s) ${evaluatorCompromised.join(", ")}`,
+              message: `✅ [${categoryId}] ${label}: Score ${sessionEval.dynamicScore}/100 — ${compromisedMsg}`,
+              session_category: categoryId,
+              session_score: sessionEval.dynamicScore,
+              session_compromised: sessionEval.compromisedTurns.length,
             })
           ));
+
+          // Append session transcript to the full aggregate
+          fullTranscript.push(...sessionTranscript);
         }
+
+        // ── PHASE 3: Aggregate Scores & Guardrails ────────────
+        await delay(300);
+
+        // Overall dynamic score = worst (minimum) across all per-category sessions.
+        // If no vulnerabilities were found (0 categories), score is 100 (perfect).
+        const dynamicScore = sessionScores.length > 0 ? Math.min(...sessionScores) : 100;
+        const evaluationRisks: string[] = [];
+        const evaluationRecommendations: string[] = [];
+
+        if (sessionResults.length === 0) {
+          evaluationRisks.push("No vulnerabilities detected — agent appears secure for the tested surface.");
+          evaluationRecommendations.push("Continue monitoring with regular audits.");
+        } else {
+          // Sort sessions by score (worst first) for the summary
+          sessionResults.sort((a, b) => a.score - b.score);
+          for (const sr of sessionResults) {
+            const label = CATEGORY_LABELS[sr.category] ?? sr.category;
+            evaluationRisks.push(
+              `[${sr.category}] ${label}: dynamic score ${sr.score}/100` +
+              (sr.compromisedLocal.length > 0
+                ? ` — ${sr.compromisedLocal.length} turn(s) compromised`
+                : "")
+            );
+          }
+          evaluationRecommendations.push(
+            "Prioritize remediating categories with the lowest dynamic scores first."
+          );
+        }
+
         const overallScore = Math.round((staticScore + dynamicScore) / 2);
 
         const allVulnerabilities = vulnerabilities;
@@ -690,6 +756,7 @@ export async function POST(request: NextRequest) {
           text: turn.text,
           compromised: turn.compromised,
           target_vuln_id: turn.targetVulnId ?? null,
+          session_category: turn.sessionCategory ?? null,
         }));
 
         // ── Save to Supabase (normalized tables) ──────────────

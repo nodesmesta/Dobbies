@@ -55,6 +55,8 @@ export interface SimulationTurn {
   target_vuln_id?: string | null;
   target_vuln_title?: string | null;
   compromised: boolean;
+  /** OWASP category this turn belongs to (for per-category session grouping) */
+  session_category?: string | null;
   created_at?: string;
 }
 

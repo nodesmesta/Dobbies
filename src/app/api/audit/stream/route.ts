@@ -327,11 +327,15 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // All forms of agents must be auditable: function-calling, prompt-only, and hybrids.
+  // Empty `tools` is valid input (chatbots without function calling still need LLMO01/06/09 audits).
+  // We synthesize an explicit placeholder so the LLM analyzer knows what it sees and downstream
+  // validation stays strict (no silent empty-string coerce).
   const toolList: DetectedAgentTool[] = tools;
   const toolNames = toolList.map((t) => t.name);
-  const toolsDescription = toolList
-    .map((t) => `${t.name}: ${t.description}`)
-    .join("\n");
+  const toolsDescription = toolList.length > 0
+    ? toolList.map((t) => `${t.name}: ${t.description}`).join("\n")
+    : "No tool or function-call definitions were provided for this agent. Analysis will cover system prompt only (LLM01 prompt injection, LLM02 insecure output handling, LLM06 sensitive information disclosure, LLM08 excessive agency, LLM09 overreliance, LLM10 model theft relevant where applicable).";
 
   // ── Streaming response ───────────────────────────────────────
   const encoder = new TextEncoder();

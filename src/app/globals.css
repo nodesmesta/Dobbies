@@ -1510,9 +1510,9 @@ button {
 }
 
 .history-card-status--completed {
-  background: rgba(34,211,153,0.15);
-  color: #22d3bb;
-  border: 1px solid rgba(34,211,153,0.3);
+  background: rgba(52,211,153,0.15);
+  color: var(--color-accent-green);
+  border: 1px solid rgba(52,211,153,0.3);
 }
 
 .history-card-repo {
@@ -1577,9 +1577,9 @@ button {
 }
 
 .history-card-vuln-item--critical {
-  background: rgba(239,68,68,0.12);
-  color: #ef4444;
-  border-color: rgba(239,68,68,0.3);
+  background: rgba(248,113,113,0.12);
+  color: var(--color-accent-red);
+  border-color: rgba(248,113,113,0.3);
 }
 
 .history-card-vuln-item--high {
@@ -1589,15 +1589,15 @@ button {
 }
 
 .history-card-vuln-item--medium {
-  background: rgba(234,179,8,0.12);
-  color: #eab308;
-  border-color: rgba(234,179,8,0.3);
+  background: rgba(251,191,36,0.12);
+  color: var(--color-accent-amber);
+  border-color: rgba(251,191,36,0.3);
 }
 
 .history-card-vuln-item--low {
-  background: rgba(34,211,153,0.12);
-  color: #22d3bb;
-  border-color: rgba(34,211,153,0.3);
+  background: rgba(52,211,153,0.12);
+  color: var(--color-accent-green);
+  border-color: rgba(52,211,153,0.3);
 }
 
 .history-card-footer {

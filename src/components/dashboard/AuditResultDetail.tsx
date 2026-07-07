@@ -84,19 +84,19 @@ export default function AuditResultDetail({
       <div className="ard-score-row">
         <div className="ard-score-item">
           <span className="ard-score-label">Static</span>
-          <span className="ard-score-value" style={{ color: report.staticScore < 40 ? "#f87171" : report.staticScore < 70 ? "#fbbf24" : "#34d399" }}>
+          <span className={`ard-score-value ${report.staticScore < 40 ? "ard-score-value--danger" : report.staticScore < 70 ? "ard-score-value--warning" : "ard-score-value--safe"}`}>
             {report.staticScore}
           </span>
         </div>
         <div className="ard-score-item">
           <span className="ard-score-label">Dynamic</span>
-          <span className="ard-score-value" style={{ color: report.dynamicScore < 40 ? "#f87171" : report.dynamicScore < 70 ? "#fbbf24" : "#34d399" }}>
+          <span className={`ard-score-value ${report.dynamicScore < 40 ? "ard-score-value--danger" : report.dynamicScore < 70 ? "ard-score-value--warning" : "ard-score-value--safe"}`}>
             {report.dynamicScore}
           </span>
         </div>
         <div className="ard-score-item">
           <span className="ard-score-label">Compromised</span>
-          <span className="ard-score-value">{report.compromised_count ?? 0}</span>
+          <span className="ard-score-value ard-score-value--danger">{report.compromised_count ?? 0}</span>
         </div>
         <div className="ard-score-item">
           <span className="ard-score-label">Vulnerabilities</span>

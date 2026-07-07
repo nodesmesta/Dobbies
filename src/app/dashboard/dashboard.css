@@ -765,6 +765,26 @@
 }
 .ard-meta { font-size: 0.8125rem; color: var(--color-text-muted); margin: 0; }
 
+.ard-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+  min-width: 0;
+}
+
+.ard-repo {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  font-family: var(--font-mono);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .ard-tabs {
   display: flex; gap: 0;
   border-bottom: 1px solid var(--color-border-subtle);
@@ -800,6 +820,42 @@
 }
 
 .ard-panel { display: flex; flex-direction: column; gap: 1rem; }
+
+/* ── Score Row (top-level Static/Dynamic/Compromised/Vulnerabilities) ── */
+.ard-score-row {
+  display: flex;
+  gap: 1.5rem;
+  padding: 1.25rem;
+  background: var(--color-surface-3);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  flex-wrap: wrap;
+}
+.ard-score-item {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-width: 100px;
+  flex: 1;
+}
+.ard-score-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--color-text-muted);
+}
+.ard-score-value {
+  font-size: 1.625rem;
+  font-weight: 800;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  letter-spacing: -0.03em;
+}
+.ard-score-value--danger  { color: var(--color-accent-red); }
+.ard-score-value--warning { color: var(--color-accent-amber); }
+.ard-score-value--safe    { color: var(--color-accent-green); }
 
 /* Overview */
 .ard-scores {
@@ -878,6 +934,43 @@
   display: flex; align-items: center; justify-content: space-between;
   flex-wrap: wrap; gap: 0.5rem;
 }
+.ard-vuln-item-top {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 0.75rem; margin-bottom: 0.25rem;
+}
+.ard-vuln-item-left {
+  display: flex; align-items: center;
+  gap: 0.5rem; min-width: 0;
+}
+.ard-vuln-status-badge {
+  display: inline-flex; align-items: center;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.65rem; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+  text-transform: capitalize;
+}
+.ard-vuln-status-badge--open {
+  background: rgba(248,113,113,0.12);
+  color: var(--color-accent-red);
+  border: 1px solid rgba(248,113,113,0.25);
+}
+.ard-vuln-status-badge--confirmed {
+  background: rgba(249,115,22,0.12);
+  color: var(--color-accent-amber);
+  border: 1px solid rgba(249,115,22,0.25);
+}
+.ard-vuln-status-badge--fixed {
+  background: rgba(52,211,153,0.12);
+  color: var(--color-accent-green);
+  border: 1px solid rgba(52,211,153,0.25);
+}
+.ard-vuln-status-badge--wontfix {
+  background: rgba(156,163,175,0.1);
+  color: #9ca3af;
+  border: 1px solid rgba(156,163,175,0.2);
+}
 .ard-vuln-category {
   font-size: 0.7rem; color: var(--color-text-muted); font-family: var(--font-mono);
 }
@@ -892,6 +985,50 @@
 }
 .ard-vuln-desc {
   font-size: 0.8375rem; color: var(--color-text-secondary); line-height: 1.6; margin: 0;
+}
+.ard-vuln-item-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-top: 0.25rem;
+  flex-wrap: wrap;
+}
+.ard-vuln-cvss {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.2rem 0.6rem;
+  background: rgba(248,113,113,0.1);
+  border: 1px solid rgba(248,113,113,0.25);
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--color-accent-red);
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+.ard-vuln-detail-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.3rem 0.75rem;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  font-size: 0.78rem;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: inherit;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.ard-vuln-detail-btn:hover {
+  color: var(--color-text-primary);
+  border-color: var(--color-border-accent);
+  background: rgba(255,255,255,0.07);
 }
 .ard-vuln-attack-info {
   display: flex;
@@ -979,6 +1116,45 @@
   line-height: 1.65;
   white-space: pre-wrap;
   word-break: break-word;
+}
+
+/* ── Loading & Empty States ── */
+.ard-loading {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1rem;
+  padding: 3rem 1rem;
+  text-align: center;
+}
+.ard-loading-spinner {
+  width: 24px; height: 24px;
+  border: 2.5px solid rgba(255,255,255,0.1);
+  border-top-color: var(--color-accent-green);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+.ard-loading p {
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+.ard-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 2rem;
+  text-align: center;
+  background: var(--color-surface-3);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+}
+.ard-empty p {
+  font-size: 0.875rem;
+  color: var(--color-text-muted);
+  margin: 0;
 }
 
 /* ─── Responsive Breakpoints ─────────────────────────────── */

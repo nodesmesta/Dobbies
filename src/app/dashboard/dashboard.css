@@ -2527,3 +2527,285 @@
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
+
+/* ── Live Red-Team Simulation: master-detail split pane ── */
+.sim-summary {
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  font-weight: 500;
+  margin-left: 0.5rem;
+}
+
+.sim-split-layout {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  gap: 1rem;
+  margin-top: 0.5rem;
+  min-height: 320px;
+}
+
+.sim-category-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  max-height: 480px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.sim-category-list::-webkit-scrollbar { width: 4px; }
+.sim-category-list::-webkit-scrollbar-thumb {
+  background: var(--color-border-subtle);
+  border-radius: 2px;
+}
+
+.sim-category-list-item {
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  padding: 0.625rem 0.75rem;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  transition: border-color 0.15s ease, background 0.15s ease;
+  color: inherit;
+}
+.sim-category-list-item:hover {
+  border-color: var(--color-border-accent);
+}
+.sim-category-list-item--selected {
+  border-color: var(--color-accent-red);
+  background: rgba(248, 113, 113, 0.05);
+}
+
+.sim-cat-row1 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  letter-spacing: 0.06em;
+}
+.sim-cat-id {
+  font-family: var(--font-mono);
+}
+.sim-cat-status {
+  font-size: 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+}
+.sim-cat-status--running {
+  background: rgba(251, 191, 36, 0.18);
+  color: #fbbf24;
+  animation: spin 1.4s linear infinite;
+}
+.sim-cat-status--done {
+  background: rgba(52, 211, 153, 0.18);
+  color: #34d399;
+}
+
+.sim-cat-row2 {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--color-text-primary);
+  line-height: 1.3;
+}
+.sim-cat-row3 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.7rem;
+  color: var(--color-text-muted);
+  flex-wrap: wrap;
+}
+.sim-cat-vulns { font-family: var(--font-mono); }
+.sim-cat-score { font-family: var(--font-mono); }
+.sim-cat-score strong {
+  color: var(--color-text-primary);
+  font-weight: 700;
+}
+.sim-cat-compromised {
+  color: #f87171;
+  font-weight: 700;
+  margin-left: 0.375rem;
+}
+
+.sim-transcript-panel {
+  background: var(--color-surface-1);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  max-height: 480px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+.sim-transcript-panel::-webkit-scrollbar { width: 6px; }
+.sim-transcript-panel::-webkit-scrollbar-thumb {
+  background: var(--color-border-subtle);
+  border-radius: 3px;
+}
+
+.sim-empty-hint {
+  margin: auto;
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+  padding: 2rem;
+}
+
+.sim-transcript {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.sim-transcript-header {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  padding-bottom: 0.625rem;
+  border-bottom: 1px solid var(--color-border-subtle);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--color-text-muted);
+}
+.sim-transcript-cat {
+  font-family: var(--font-mono);
+  color: var(--color-accent-red);
+}
+.sim-transcript-label {
+  color: var(--color-text-secondary);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+}
+
+.sim-turn-pair {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.sim-turn-target {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  color: var(--color-text-muted);
+  padding: 0.25rem 0;
+  font-family: var(--font-mono);
+}
+.sim-turn-num {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 4px;
+  padding: 0.05rem 0.4rem;
+  font-weight: 700;
+  font-size: 0.65rem;
+  letter-spacing: 0.04em;
+}
+.sim-turn-target-title {
+  color: var(--color-text-secondary);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sim-bubble {
+  border-radius: var(--radius-md);
+  padding: 0.625rem 0.875rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  max-width: 92%;
+  width: fit-content;
+  font-size: 0.8375rem;
+  line-height: 1.55;
+}
+.sim-bubble--attacker {
+  background: rgba(248, 113, 113, 0.08);
+  border: 1px solid rgba(248, 113, 113, 0.22);
+  align-self: flex-start;
+}
+.sim-bubble--agent {
+  background: rgba(52, 211, 153, 0.08);
+  border: 1px solid rgba(52, 211, 153, 0.22);
+  align-self: flex-end;
+}
+.sim-bubble--compromised {
+  border-color: rgba(248, 113, 113, 0.5) !important;
+  background: rgba(248, 113, 113, 0.14) !important;
+}
+.sim-bubble-sender {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+}
+.sim-bubble-warning {
+  margin-left: 0.5rem;
+  color: #f87171;
+  font-weight: 800;
+  font-size: 0.65rem;
+}
+.sim-bubble-text {
+  margin: 0;
+  color: var(--color-text-primary);
+  word-break: break-word;
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+}
+
+.sim-eval-footer {
+  display: flex;
+  align-items: center;
+  gap: 0.625rem;
+  flex-wrap: wrap;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--color-border-subtle);
+  font-size: 0.8rem;
+}
+.sim-eval-label {
+  color: var(--color-text-muted);
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-weight: 600;
+}
+.sim-eval-score {
+  font-size: 1.125rem;
+  font-weight: 800;
+  color: var(--color-text-primary);
+  font-variant-numeric: tabular-nums;
+}
+.sim-eval-clean {
+  color: var(--color-accent-green);
+  font-weight: 600;
+  font-size: 0.75rem;
+}
+.sim-eval-compromised {
+  color: #f87171;
+  font-weight: 700;
+  font-size: 0.75rem;
+}
+
+/* Narrow viewports: collapse split to a vertically stacked layout. */
+@media (max-width: 720px) {
+  .sim-split-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto 1fr;
+  }
+  .sim-category-list {
+    max-height: 200px;
+  }
+}

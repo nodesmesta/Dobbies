@@ -23,15 +23,31 @@ export function AuditRunner({
   onAuditComplete: (report: AuditReport) => void;
   onBack?: () => void;
 }) {
-  const [isRunning, setIsRunning]       = useState(false);
+  const [isRunning, setIsRunning] = useState(false);
   const [statusMessages, setStatusMessages] = useState<StatusMessage[]>([]);
-  const [chatTurns, setChatTurns]       = useState<SimulationTurn[]>([]);
-  const [staticResult, setStaticResult] = useState<{ score: number; message: string } | null>(null);
-  const [phase, setPhase]               = useState<"idle" | "static" | "dynamic" | "done">("idle");
+  const [staticResult, setStaticResult] = useState<{
+    score: number;
+    message: string;
+    vulnerabilities: Vulnerability[];
+  } | null>(null);
+  const [phase, setPhase] = useState<"idle" | "static" | "dynamic" | "done">("idle");
 
-  const abortRef    = useRef<AbortController | null>(null);
-  const chatEndRef   = useRef<HTMLDivElement>(null);
+  // ── Live simulation: bucketed per OWASP category (parallel pipeline
+  // delivers events interleaved across categories; we bucket then render
+  // a master-detail split-pane: left = categories list, right = transcript).
+  const [sessions, setSessions] = useState<Map<string, SimulationTurn[]>>(() => new Map());
+  const [categoryMeta, setCategoryMeta] = useState<Map<string, {
+    label: string;
+    status: "running" | "done";
+    score?: number;
+    compromised?: number;
+    vulns: number;
+  }>>(() => new Map());
+  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+
+  const abortRef = useRef<AbortController | null>(null);
   const statusEndRef = useRef<HTMLDivElement>(null);
+  const panelScrollRef = useRef<HTMLDivElement>(null);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -57,7 +73,9 @@ export function AuditRunner({
     if (isRunning) return;
     setIsRunning(true);
     setStatusMessages([]);
-    setChatTurns([]);
+    setSessions(new Map());
+    setCategoryMeta(new Map());
+    setSelectedCategory(null);
     setStaticResult(null);
     setPhase("static");
 
@@ -136,9 +154,34 @@ export function AuditRunner({
                 if (isRedTeam) setPhase("dynamic");
                 addStatus(msg);
               } else if (currentEvent === "static_result") {
-                const d = data as { score: number; message: string };
+                const d = data as { score: number; message: string; vulnerabilities?: Vulnerability[] };
                 localStaticScore = d.score;
-                setStaticResult({ score: d.score, message: d.message });
+                const vulns = d.vulnerabilities ?? [];
+                setStaticResult({ score: d.score, message: d.message, vulnerabilities: vulns });
+                // Seed categoryMeta with vuln counts grouped by category_id so
+                // the left list has skeletons for every OWASP category that
+                // static analysis flagged before the simulation turns arrive.
+                setCategoryMeta((prev) => {
+                  const next = new Map(prev);
+                  for (const v of vulns) {
+                    const cat = v.category_id;
+                    const curr = next.get(cat);
+                    if (curr) {
+                      next.set(cat, {
+                        ...curr,
+                        label: v.category_name ?? curr.label,
+                        vulns: (curr.vulns ?? 0) + 1,
+                      });
+                    } else {
+                      next.set(cat, {
+                        label: v.category_name ?? cat,
+                        status: "running",
+                        vulns: 1,
+                      });
+                    }
+                  }
+                  return next;
+                });
                 addStatus(`✓ ${d.message}`, true);
               } else if (currentEvent === "error") {
                 const d = data as { message: string };
@@ -146,24 +189,68 @@ export function AuditRunner({
                 setIsRunning(false);
                 addStatus(`Error: ${d.message}`);
               } else if (currentEvent === "chat_turn") {
-                const d = data as { sender: "attacker" | "agent"; text: string; compromised?: boolean; targetVulnId?: string; targetVulnTitle?: string; sessionCategory?: string };
-                setChatTurns((prev) => [
-                  ...prev,
-                  {
-                    id: `turn-${Date.now()}-${Math.random()}`,
-                    sender: d.sender,
-                    text: d.text,
-                    created_at: new Date().toISOString(),
-                    compromised: d.compromised ?? false,
-                    target_vuln_id: d.targetVulnId ?? null,
-                    target_vuln_title: d.targetVulnTitle ?? null,
-                    session_category: d.sessionCategory ?? null,
-                    turn_number: prev.length + 1,
-                  },
-                ]);
+                const d = data as {
+                  sender: "attacker" | "agent";
+                  text: string;
+                  compromised?: boolean;
+                  targetVulnId?: string;
+                  targetVulnTitle?: string;
+                  sessionCategory?: string;
+                };
+                const cat = d.sessionCategory ?? "_unknown";
+                setSessions((prev) => {
+                  const next = new Map(prev);
+                  const arr = next.get(cat) ?? [];
+                  next.set(cat, [
+                    ...arr,
+                    {
+                      id: `turn-${Date.now()}-${Math.random()}`,
+                      sender: d.sender,
+                      text: d.text,
+                      created_at: new Date().toISOString(),
+                      compromised: d.compromised ?? false,
+                      target_vuln_id: d.targetVulnId ?? null,
+                      target_vuln_title: d.targetVulnTitle ?? null,
+                      session_category: cat,
+                      turn_number: arr.length + 1,
+                    },
+                  ]);
+                  return next;
+                });
+                // First chat_turn for a category just landed — set selectedCategory
+                // to it so the right pane has content right away. We only assign
+                // when curr is null (first event for the whole audit).
+                setSelectedCategory((curr) => (curr === null ? cat : curr));
+                // Auto-scroll right pane if user is near bottom; pauses if user
+                // scrolled up to read older turns.
                 setTimeout(() => {
-                  chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+                  const el = panelScrollRef.current;
+                  if (el) {
+                    const nearBottom =
+                      el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+                    if (nearBottom) {
+                      el.scrollTop = el.scrollHeight;
+                    }
+                  }
                 }, 50);
+              } else if (currentEvent === "partial_score") {
+                const d = data as { category: string; label: string; score: number; compromised: number };
+                setCategoryMeta((prev) => {
+                  const next = new Map(prev);
+                  const curr = next.get(d.category) ?? {
+                    label: d.label,
+                    status: "running" as const,
+                    vulns: 0,
+                  };
+                  next.set(d.category, {
+                    ...curr,
+                    label: d.label,
+                    status: "done",
+                    score: d.score,
+                    compromised: d.compromised,
+                  });
+                  return next;
+                });
               } else if (currentEvent === "final_result") {
                 const d = data as {
                   reportId?: string;
@@ -305,8 +392,10 @@ export function AuditRunner({
             <div ref={statusEndRef} />
           </div>
 
-          {/* Chat simulation */}
-          {chatTurns.length > 0 && (
+          {/* Chat simulation — master/detail split. left list = OWASP
+              categories running in parallel; right pane = transcript for
+              selectedCategory. Replaces the old single-thread chat log. */}
+          {categoryMeta.size > 0 && (
             <div className="ar-chat-section">
               <p className="ar-chat-label">
                 <svg width="12" height="12" viewBox="0 0 12 12" fill="none">
@@ -314,41 +403,140 @@ export function AuditRunner({
                   <path d="M4 6l1.5 1.5L8 4" stroke="#f87171" strokeWidth="1" strokeLinecap="round" />
                 </svg>
                 Live Red-Team Simulation
+                <span className="sim-summary">
+                  · {categoryMeta.size} categor{categoryMeta.size === 1 ? "y" : "ies"} ·{" "}
+                  {Array.from(categoryMeta.values()).filter((m) => m.status === "done").length} done
+                </span>
               </p>
-              <div className="ar-chat-log">
-                {chatTurns.map((turn, idx) => {
-                  // Detect session change for separator header
-                  const prevCategory = idx > 0 ? chatTurns[idx - 1].session_category : null;
-                  const isNewSession = turn.session_category && turn.session_category !== prevCategory;
-                  return (
-                    <div key={turn.id} className={`ar-chat-row ar-chat-row--${turn.sender}`}>
-                      {isNewSession && (
-                        <div className="ar-session-header">
-                          <span className="ar-session-badge">
-                            Session: {turn.session_category?.toUpperCase() ?? "??"}
+              <div className="sim-split-layout">
+                {/* Left: list of categories */}
+                <div className="sim-category-list" role="listbox" aria-label="OWASP categories">
+                  {Array.from(categoryMeta.entries()).map(([cat, meta]) => {
+                    const isSelected = selectedCategory === cat;
+                    return (
+                      <button
+                        key={cat}
+                        type="button"
+                        role="option"
+                        aria-selected={isSelected}
+                        className={`sim-category-list-item${isSelected ? " sim-category-list-item--selected" : ""}`}
+                        onClick={() => setSelectedCategory(cat)}
+                      >
+                        <div className="sim-cat-row1">
+                          <span className="sim-cat-id">{cat}</span>
+                          <span className={`sim-cat-status sim-cat-status--${meta.status}`}>
+                            {meta.status === "done" ? "✓" : "◐"}
                           </span>
                         </div>
-                      )}
-                      <div
-                        className={`ar-chat-bubble ar-chat-bubble--${turn.sender} animate-fade-in-up`}
-                      >
-                        <div className="ar-chat-sender">
-                          {turn.sender === "attacker" ? "🎯 Attacker" : "🤖 Agent"}
-                          {turn.sender === "attacker" && turn.target_vuln_title && (
-                            <span className="ar-chat-target" title={`Target: ${turn.target_vuln_title}`}>
-                              → {turn.target_vuln_title.slice(0, 30)}{turn.target_vuln_title.length > 30 ? "…" : ""}
+                        <div className="sim-cat-row2">{meta.label}</div>
+                        <div className="sim-cat-row3">
+                          <span className="sim-cat-vulns">
+                            {meta.vulns} vuln{meta.vulns !== 1 ? "s" : ""}
+                          </span>
+                          {meta.status === "done" && meta.score !== undefined && (
+                            <span className="sim-cat-score">
+                              Score: <strong>{meta.score}</strong>
+                              {meta.compromised != null && meta.compromised > 0 && (
+                                <span className="sim-cat-compromised">⚠ {meta.compromised}</span>
+                              )}
                             </span>
                           )}
-                          {turn.compromised && (
-                            <span className="ar-chat-compromised">⚠ COMPROMISED</span>
-                          )}
                         </div>
-                        <p className="ar-chat-text">{turn.text}</p>
-                      </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* Right: transcript for the selected category */}
+                <div className="sim-transcript-panel" ref={panelScrollRef}>
+                  {selectedCategory === null ? (
+                    <div className="sim-empty-hint">
+                      <p>Pilih kategori di kiri untuk lihat transkrip.</p>
                     </div>
-                  );
-                })}
-                <div ref={chatEndRef} />
+                  ) : (() => {
+                    const turns = sessions.get(selectedCategory) ?? [];
+                    const meta = categoryMeta.get(selectedCategory);
+                    if (turns.length === 0) {
+                      return (
+                        <div className="sim-empty-hint">
+                          <p>{meta?.label ?? selectedCategory} belum ada turn.</p>
+                        </div>
+                      );
+                    }
+                    // Group turns into pairs (attacker → agent) so we can
+                    // show one "turn card" per conversational round.
+                    const pairs: Array<{
+                      turnNumber: number;
+                      vulnTitle: string | null;
+                      attackerText: string | null;
+                      agentText: string | null;
+                      compromised: boolean;
+                    }> = [];
+                    for (let i = 0; i < turns.length; i += 2) {
+                      const atk = turns[i];
+                      const ag = turns[i + 1];
+                      pairs.push({
+                        turnNumber: Math.floor(i / 2) + 1,
+                        vulnTitle: atk?.target_vuln_title ?? null,
+                        attackerText: atk?.text ?? null,
+                        agentText: ag?.text ?? null,
+                        compromised: Boolean(ag?.compromised),
+                      });
+                    }
+                    return (
+                      <div className="sim-transcript">
+                        <div className="sim-transcript-header">
+                          <span className="sim-transcript-cat">{selectedCategory}</span>
+                          <span className="sim-transcript-label">{meta?.label ?? ""}</span>
+                        </div>
+                        {pairs.map((pair, idx) => (
+                          <div key={idx} className="sim-turn-pair">
+                            {pair.vulnTitle && (
+                              <div className="sim-turn-target">
+                                <span className="sim-turn-num">Turn {pair.turnNumber}</span>
+                                <span className="sim-turn-target-title">{pair.vulnTitle}</span>
+                              </div>
+                            )}
+                            {pair.attackerText && (
+                              <div className="sim-bubble sim-bubble--attacker">
+                                <div className="sim-bubble-sender">🎯 Attacker</div>
+                                <p className="sim-bubble-text">{pair.attackerText}</p>
+                              </div>
+                            )}
+                            {pair.agentText && (
+                              <div
+                                className={`sim-bubble sim-bubble--agent${
+                                  pair.compromised ? " sim-bubble--compromised" : ""
+                                }`}
+                              >
+                                <div className="sim-bubble-sender">
+                                  🤖 Agent
+                                  {pair.compromised && (
+                                    <span className="sim-bubble-warning">⚠ COMPROMISED</span>
+                                  )}
+                                </div>
+                                <p className="sim-bubble-text">{pair.agentText}</p>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                        {meta?.status === "done" && meta.score !== undefined && (
+                          <div className="sim-eval-footer">
+                            <span className="sim-eval-label">Per-category dynamic score:</span>
+                            <strong className="sim-eval-score">{meta.score}/100</strong>
+                            {meta.compromised != null && meta.compromised > 0 ? (
+                              <span className="sim-eval-compromised">
+                                ⚠ {meta.compromised} turn(s) compromised
+                              </span>
+                            ) : (
+                              <span className="sim-eval-clean">no compromise</span>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
               </div>
             </div>
           )}

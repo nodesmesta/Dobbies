@@ -584,13 +584,15 @@ export async function POST(request: NextRequest) {
           byCategory.get(v.category_id)!.push(v);
         }
 
-        trace(`phase 2 start: ${byCategory.size} OWASP categories → per-category sessions (3 turns each)`);
+        trace(`phase 2 start: ${byCategory.size} OWASP categories (parallel across categories)`);
 
-        const fullTranscript: SandboxTurn[] = [];
-        const sessionScores: number[] = [];
-        const sessionResults: { category: string; score: number; compromisedLocal: number[] }[] = [];
-
-        for (const [categoryId, categoryVulns] of byCategory) {
+        // ── Launch every category session in parallel via Promise.allSettled.
+        // Inner turn loop stays sequential (each turn needs prior transcript
+        // context); parallelism is across OWASP categories, which are
+        // independent. With 6 categories × 3 turns sequential inside, wall-
+        // time was ~280-310s sequential; parallel drops it to roughly the
+        // max slowest category (~50-80s) — well under the 300s Vercel cap.
+        const categoryJobs = Array.from(byCategory.entries()).map(async ([categoryId, categoryVulns]) => {
           const label = CATEGORY_LABELS[categoryId] ?? categoryId;
 
           // SSE: session start
@@ -683,10 +685,18 @@ export async function POST(request: NextRequest) {
             }
           }
 
-          // Track agent-compromised count for this session
-          const agentCompromisedLocal = sessionEval.compromisedTurns.filter(
-            n => sessionTranscript[n - 1]?.sender === "agent"
-          ).length;
+          // partial_score: lets the UI's left-panel card flip from "running"
+          // → "done" with score as soon as this category's eval finishes,
+          // independent of other categories still running.
+          controller.enqueue(encoder.encode(
+            sseEvent("partial_score", {
+              category: categoryId,
+              label,
+              score: sessionEval.dynamicScore,
+              compromised: sessionEval.compromisedTurns.length,
+            })
+          ));
+
           sessionScores.push(sessionEval.dynamicScore);
           sessionResults.push({
             category: categoryId,
@@ -707,8 +717,34 @@ export async function POST(request: NextRequest) {
             })
           ));
 
-          // Append session transcript to the full aggregate
-          fullTranscript.push(...sessionTranscript);
+          return {
+            category: categoryId,
+            label,
+            transcript: sessionTranscript,
+            eval: sessionEval,
+          };
+        });
+
+        const categoryResults = await Promise.allSettled(categoryJobs);
+
+        // Aggregate each category's result back into the synchronous shape
+        // the rest of the pipeline expects. Failures from a single category
+        // (LLM 5xx / timeout / parse error) do not stop the audit — others
+        // continue, the failed one is logged and skipped.
+        const fullTranscript: SandboxTurn[] = [];
+        const sessionScores: number[] = [];
+        const sessionResults: { category: string; score: number; compromisedLocal: number[] }[] = [];
+        for (const result of categoryResults) {
+          if (result.status === "rejected") {
+            const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
+            trace(`category job failed: ${reason}`);
+            controller.enqueue(encoder.encode(
+              sseEvent("status", { message: `❌ Session failed: ${reason}` })
+            ));
+            continue;
+          }
+          const { transcript, eval: sessionEval } = result.value;
+          fullTranscript.push(...transcript);
         }
 
         // ── PHASE 3: Aggregate Scores & Guardrails ────────────

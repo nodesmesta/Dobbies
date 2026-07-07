@@ -2639,18 +2639,17 @@
 }
 
 .sim-transcript-panel {
-  /* Single container — same shape and tokens as VulnDetailCard.
-     The live transcript is one document: sectioned by uppercase
-     labels and divider lines; no nested boxes within. */
-  background: var(--color-surface-3);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-lg);
-  padding: 1.5rem;
+  /* Layout-only container — no own surface/border/radius/padding.
+     The parent's surface (`.ar-chat-section` → `.ar-progress-panel`,
+     both surface-3) provides the visible card rectangle. Sections
+     here flow vertically — divider lines below each turn are the
+     only visual rhythm needed, mirroring VulnDetailCard's
+     single-document section flow. */
   max-height: 480px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
+  gap: 1rem;
 }
 .sim-transcript-panel::-webkit-scrollbar { width: 6px; }
 .sim-transcript-panel::-webkit-scrollbar-thumb {
@@ -2690,26 +2689,23 @@
   letter-spacing: 0.04em;
 }
 
-/* Per-turn block — a logical group inside the panel, NOT a
-   nested card. Dividers above each new turn create the visual
-   rhythm; the panel itself owns the surface. */
-.sim-turn-block {
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-}
+/* Per-turn divider — sits inline as a sibling in the panel,
+   not within a wrapper block. Top margin separates it from
+   the previous turn's agent section; bottom border + padding
+   signals the start of a new turn block. */
 .sim-turn-divider {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   font-size: 0.75rem;
   color: var(--color-text-muted);
+  margin-top: 0.5rem;
   padding-bottom: 0.625rem;
   border-bottom: 1px solid var(--color-border-subtle);
   font-family: var(--font-mono);
 }
 .sim-turn-num {
-  background: var(--color-surface-1);
+  background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--color-border-subtle);
   border-radius: 4px;
   padding: 0.05rem 0.4rem;

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect } from "react";
+import { Fragment, useState, useRef, useCallback, useEffect } from "react";
 import { AuditReport, Vulnerability, SimulationTurn, GuardrailConfig, DetectedAgent } from "@/lib/audit/types";
 import { ScoreRing, SeverityBadge } from "@/components/dashboard/AuditComponents";
 
@@ -490,13 +490,14 @@ export function AuditRunner({
                           <span className="sim-transcript-label">{meta?.label ?? ""}</span>
                         </div>
                         {pairs.map((pair, idx) => (
-                          // Single-container document: each turn is a
-                          // logical block *inside* the transcript panel,
-                          // not a nested card of its own. Layout follows
-                          // VulnDetailCard.tsx — vertical sections with
-                          // uppercase label + monospace body block, no
-                          // child boxes with their own bg/border/padding.
-                          <div key={idx} className="sim-turn-block">
+                          // Each turn is rendered as a logical sequence
+                          // inside the same flowing document: divider
+                          // line + 2 sections (no nested wrapper block).
+                          // This way the transcript panel reads like
+                          // VulnDetailCard's section flow — the parent
+                          // surface-3 panel owns all visual treatment;
+                          // dividers create sub-rhythm only.
+                          <Fragment key={idx}>
                             {pair.vulnTitle && (
                               <div className="sim-turn-divider">
                                 <span className="sim-turn-num">Turn {pair.turnNumber}</span>
@@ -524,7 +525,7 @@ export function AuditRunner({
                                 <div className="sim-section-body">{pair.agentText}</div>
                               </section>
                             )}
-                          </div>
+                          </Fragment>
                         ))}
                         {meta?.status === "done" && meta.score !== undefined && (
                           <div className="sim-eval-footer">

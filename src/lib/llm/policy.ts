@@ -88,7 +88,12 @@ function resolvePrimaryModel(role: LlmRole, override?: string): string {
   if (override && override.length > 0) return override;
 
   if (role === "dobbies-chat") {
-    return process.env.DOBBIES_CHAT_MODEL?.trim() || "openai/gpt-4o";
+    // Fallback updated to a model that is actually deployed on Fireworks
+    // serverless. Verified 2026-07-08: "openai/gpt-4o" returned HTTP 404
+    // (NOT_FOUND), so we point to accounts/fireworks/models/gpt-oss-120b —
+    // OpenAI's open-source instruction-tuned model — unless the operator
+    // explicitly sets DOBBIES_CHAT_MODEL.
+    return process.env.DOBBIES_CHAT_MODEL?.trim() || "accounts/fireworks/models/gpt-oss-120b";
   }
 
   const fromEnv = process.env.AUDIT_MODEL?.trim();

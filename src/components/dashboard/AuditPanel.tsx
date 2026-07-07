@@ -82,7 +82,17 @@ export function AuditRunner({
       });
 
       if (!response.ok) {
-        addStatus("Error: Audit pipeline failed to start");
+        // Read SSE error body so user sees real reason.
+        let errMsg = `HTTP ${response.status}`;
+        try {
+          const txt = await response.text();
+          const match = txt.match(/data:\s*(\{.*\})/);
+          if (match) {
+            const parsed = JSON.parse(match[1]);
+            if (parsed?.message) errMsg = parsed.message;
+          }
+        } catch {}
+        addStatus(`Error: ${errMsg}`);
         setIsRunning(false);
         return;
       }

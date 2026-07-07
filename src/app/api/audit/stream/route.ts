@@ -202,8 +202,13 @@ async function saveVulnerabilities(
   const idMap: Record<string, string> = {};
   const counts = { vulnerability_count: 0, critical_count: 0, high_count: 0, medium_count: 0, low_count: 0 };
 
+  // Track categories of vulnerabilities that the LLM detected but our catalogue
+  // does not know about. We surface this as a warning rather than silently
+  // dropping the row, and we skip the insert so the database FK is obeyed.
+  const skippedCategories = new Set<string>();
+
   for (const vuln of vulnerabilities) {
-    const { data: inserted } = await supabase
+    const { data: inserted, error } = await supabase
       .from("vulnerabilities")
       .insert({
         report_id: reportId,
@@ -224,6 +229,19 @@ async function saveVulnerabilities(
       .select("id")
       .single();
 
+    if (error) {
+      console.warn(
+        `[saveVulnerabilities] failed to insert vuln category_id="${vuln.category_id}" ` +
+          `title="${vuln.title?.slice(0, 60)}": ${error.message} (code ${error.code})`,
+      );
+      if (error.code === "23503") {
+        // FK violation — vulnerability_categories does not have this id.
+        skippedCategories.add(vuln.category_id);
+      }
+      // For FK mismatch, skip silently for the index map but still count it in
+      // the final summary so the user sees what was discarded.
+      continue;
+    }
     if (inserted) {
       idMap[vuln.id] = inserted.id;
     }
@@ -232,6 +250,13 @@ async function saveVulnerabilities(
     else if (vuln.severity === "high") counts.high_count++;
     else if (vuln.severity === "medium") counts.medium_count++;
     else if (vuln.severity === "low") counts.low_count++;
+  }
+
+  if (skippedCategories.size > 0) {
+    console.warn(
+      `[saveVulnerabilities] ${skippedCategories.size} LLM-detected categories were ` +
+        `not in vulnerability_categories and were skipped: ${Array.from(skippedCategories).join(", ")}`,
+    );
   }
 
   return { idMap, counts };

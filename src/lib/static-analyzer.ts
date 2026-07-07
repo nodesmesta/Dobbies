@@ -267,8 +267,10 @@ function coerceFinding(raw: unknown, index: number): StaticFinding {
   // Apply field alias map: LLMs emit {id,name,risk,...} or {category,severity_lowcase,...}
   // The map copies the first non-empty value from each alias list into the canonical key.
   const r = applyFieldAliases(raw as Record<string, unknown>);
+  // The OWASP category ids in v...[truncated]orn duplicate detection.
+  const normalizedCategoryId = requireString(r.category_id, "category_id", index).trim().toLowerCase();
   return {
-    category_id: requireString(r.category_id, "category_id", index),
+    category_id: normalizedCategoryId,
     title: requireString(r.title, "title", index),
     severity: coerceSeverity(r.severity),
     description: requireString(r.description, "description", index),

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { chatCompletion, ChatMessage } from "@/lib/llm/client";
+import { callLlm } from "@/lib/llm/gateway";
+import type { ChatMessage } from "@/lib/llm/errors";
 import { createClient } from "@/utils/supabase/server";
 
 export async function POST(request: NextRequest) {
@@ -16,13 +17,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid messages format" }, { status: 400 });
     }
 
-    if (!process.env.OPENAI_API_KEY) {
-      return NextResponse.json(
-        { error: "LLM service is not configured. Set OPENAI_API_KEY environment variable." },
-        { status: 503 }
-      );
-    }
-
+    // Boundary check + env fallback are gateway's job. We just check the
+    // precondition that the dobbies-chat role has a model configured
+    // (gateway's LlmError("boundary_invalid", "dobbies-chat", ...) handles
+    // OPENAI_API_KEY / DOBBIES_CHAT_MODEL / default fallback to "openai/gpt-4o").
     const systemPrompt: ChatMessage = {
       role: "system",
       content: `You are the Dobbies security assistant, a helpful and knowledgeable AI security specialist built to guide developers in auditing and securing their AI agents.
@@ -35,13 +33,9 @@ Provide clear, actionable, and secure coding practices. Keep your responses conc
       content: m.content || m.text || "",
     }));
 
-    const llmMessages = [systemPrompt, ...formattedMessages];
+    const llmMessages: ChatMessage[] = [systemPrompt, ...formattedMessages];
 
-    const response = await chatCompletion(llmMessages, {
-      model: "openai/gpt-4o",
-      temperature: 0.7,
-      maxTokens: 1024,
-    });
+    const response = await callLlm({ role: "dobbies-chat", messages: llmMessages });
 
     if (!response) {
       return NextResponse.json(
@@ -52,7 +46,16 @@ Provide clear, actionable, and secure coding practices. Keep your responses conc
 
     return NextResponse.json({ reply: response });
   } catch (error) {
+    // gateway.callLlm throws LlmError — surface its message verbatim so the
+    // caller sees the actual failure cause (http_5xx, boundary_invalid, etc.).
+    // Anything non-LlmError is "Internal Server Error" by default.
     const message = error instanceof Error ? error.message : "Internal Server Error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    // Boundary errors (config / input) → 503/400; transport errors → 502;
+    // generic 500 for everything else. Caller-side role is "dobbies-chat",
+    // so any classification can be sender-derived.
+    const status = error instanceof Error && /OPENAI_API_KEY|No model configured|dobbies chat/i.test(error.message)
+      ? 503
+      : 500;
+    return NextResponse.json({ error: message }, { status });
   }
 }

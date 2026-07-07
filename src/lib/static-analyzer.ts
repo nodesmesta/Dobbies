@@ -5,6 +5,11 @@
  *   1. Structural tool analysis — detect dangerous tool names/descriptions
  *   2. LLM prompt analysis — contextual review of system prompt semantics
  *
+ * Routing is delegated to /lib/llm/gateway.callLlm — no HTTP transport
+ * or retry logic in this file. JSON-shape validation here (13 required
+ * fields per finding, severity in canonical-bucket set) is role-specific
+ * and belongs to the static-analyzer's domain, not the gateway.
+ *
  * Fail-loud contract:
  *   - Missing systemPrompt or tools throws
  *   - LLM failure throws
@@ -12,7 +17,8 @@
  *   - Unknown severity in LLM output throws
  *   - Empty `findings` array is a valid clean result, not a fallback
  */
-import { chatCompletionWithRetry } from "@/lib/llm/client";
+import { callLlm } from "@/lib/llm/gateway";
+import type { ChatMessage } from "@/lib/llm/errors";
 import type { Severity } from "@/lib/audit/types";
 import securityRules from "@/lib/security-rules.json";
 import {
@@ -237,7 +243,7 @@ Analyze the above system prompt and tool definitions for OWASP LLM Top 10 securi
 }
 
 function coerceFindingsArray(parsed: unknown): RawFinding[] {
-  // Tolerates bare array, wrapped object ({findings|vulnerabilities|issues|results|data|...}:[...]}),
+  // Tolerates bare array, wrapped object ({findings|vulnerabilities|issues|results|data|...}:[...]),
   // and prose-padded JSON. Unwrapping logic is centralized in parse-lenient.
   const found = unwrapFindingsArray(parsed);
   if (!found) {
@@ -288,30 +294,22 @@ function coerceFinding(raw: unknown, index: number): StaticFinding {
 async function analyzePromptWithLLM(
   systemPrompt: string,
   toolsDescription: string,
-  model: string,
+  model?: string,
 ): Promise<StaticFinding[]> {
-  if (!model) throw new Error("analyzePromptWithLLM requires `model` argument");
   if (!systemPrompt) throw new Error("analyzePromptWithLLM requires non-empty `systemPrompt`");
   if (!toolsDescription) throw new Error("analyzePromptWithLLM requires non-empty `toolsDescription`");
 
   const userPrompt = buildAnalysisPrompt(systemPrompt, toolsDescription);
+  const messages: ChatMessage[] = [
+    { role: "system", content: ANALYSIS_SYSTEM_PROMPT },
+    { role: "user", content: userPrompt },
+  ];
 
-  // Static analyzer emits a single JSON object containing a findings
-  // array. response_format=json_object constrains shape. We use the
-  // retry wrapper so a reasoning-style model that burns its budget on
-  // internal chain-of-thought during a verbose prompt gets up to two
-  // retries at 1.5x budget — same prompt context, message array
-  // untouched so output remains semantically equivalent. base cap is
-  // 6144 (4096 * 1.5) — well above attacker/agent so this caller has
-  // real headroom to recover from a single large system prompt.
-  const response = await chatCompletionWithRetry(
-    [
-      { role: "system", content: ANALYSIS_SYSTEM_PROMPT },
-      { role: "user", content: userPrompt },
-    ],
-    { model, temperature: 0.1, maxTokens: 4096, responseFormat: "json_object" },
-    "static-analyzer",
-  );
+  // gateway.callLlm owns: model resolution, transport, retry (1.5× budget
+  // on finish_reason=length + empty), error envelope. The
+  // response_format=json_object + higher maxTokens base are in /policy
+  // ROLE_DEFAULTS for "static-analyzer".
+  const response = await callLlm({ role: "static-analyzer", messages, modelOverride: model });
 
   let parsed: unknown;
   try {
@@ -359,16 +357,16 @@ function calculateScore(findings: StaticFinding[]): number {
  * @param systemPrompt     — Required. The agent's system prompt text.
  * @param toolsDescription — Required. Stringified tool descriptions.
  * @param tools            — Required. Parsed tool array for structural analysis.
- * @param model            — Required. Model identifier for the static-analyzer LLM.
+ * @param model            — Optional. Model override; falls back to AUDIT_MODEL
+ *                           env via gateway when omitted/empty.
  * @returns                  Combined findings and a 0-100 security score.
  */
 export async function runStaticAnalysis(
   systemPrompt: string,
   toolsDescription: string,
   tools: { name: string; description: string }[],
-  model: string,
+  model?: string,
 ): Promise<StaticResult> {
-  if (!model) throw new Error("runStaticAnalysis requires `model` argument");
   if (!systemPrompt) throw new Error("runStaticAnalysis requires non-empty `systemPrompt`");
   if (!toolsDescription) throw new Error("runStaticAnalysis requires non-empty `toolsDescription`");
   if (!Array.isArray(tools)) throw new Error("runStaticAnalysis requires `tools` array");

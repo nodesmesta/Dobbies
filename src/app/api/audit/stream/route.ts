@@ -39,26 +39,6 @@ interface SandboxResult {
   compromisedTurns: number[];
 }
 
-// ─── Audit-time model configuration ──────────────────────────
-// All three LLM roles (attacker, agent simulator, evaluator) MUST
-// use the same model per project convention. Caller can override via
-// request body (model field) or env (AUDIT_MODEL).
-function resolveAuditModel(body: { model?: string }): string {
-  const fromRequest = typeof body.model === "string" && body.model.length > 0
-    ? body.model
-    : undefined;
-  const fromEnv = process.env.AUDIT_MODEL && process.env.AUDIT_MODEL.length > 0
-    ? process.env.AUDIT_MODEL
-    : undefined;
-  const model = fromRequest ?? fromEnv;
-  if (!model) {
-    throw new Error(
-      "No audit LLM model configured. Set `AUDIT_MODEL` env var or pass `model` in request body.",
-    );
-  }
-  return model;
-}
-
 // ─── SSE helpers ──────────────────────────────────────────────
 
 function sseEvent(event: string, data: unknown): string {
@@ -519,16 +499,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  let auditModel: string;
-  try {
-    auditModel = resolveAuditModel({ model: modelBody });
-  } catch (err) {
-    return new Response(
-      sseEvent("error", { message: err instanceof Error ? err.message : String(err) }),
-      { status: 400, headers: { "Content-Type": "text/event-stream" } }
-    );
-  }
-
   // All forms of agents must be auditable: function-calling, prompt-only, and hybrids.
   // Empty `tools` is valid input (chatbots without function calling still need LLMO01/06/09 audits).
   // We synthesize an explicit placeholder so the LLM analyzer knows what it sees and downstream
@@ -547,7 +517,7 @@ export async function POST(request: NextRequest) {
       const reportId = `audit-${t0}`;
       const trace = (msg: string) => console.log(`[audit-stream:${reportId}] ${Date.now() - t0}ms ${msg}`);
       try {
-        trace(`pipeline start for agent="${agentName}" tools=${toolNames.length} model=${auditModel}`);
+        trace(`pipeline start for agent="${agentName}" tools=${toolNames.length} model=${modelBody}`);
 
         // ── PHASE 1: RAG Static Analysis ──────────────────────
         controller.enqueue(encoder.encode(
@@ -572,7 +542,7 @@ export async function POST(request: NextRequest) {
 
         const t_phase1 = Date.now();
         trace(`analyzeWithRAG start`);
-        const ragResult = await analyzeWithRAG(prompt, toolsDescription, toolList, auditModel);
+        const ragResult = await analyzeWithRAG(prompt, toolsDescription, toolList, modelBody);
         const staticScore = ragResult.score;
         const vulnerabilities = ragResult.vulnerabilities;
         trace(`analyzeWithRAG done in ${Date.now() - t_phase1}ms → score=${staticScore} vulns=${vulnerabilities.length}`);
@@ -616,7 +586,7 @@ export async function POST(request: NextRequest) {
             fullTranscript,
             vulnerabilities,
             targetVuln,
-            auditModel,
+            modelBody,
           );
           trace(`turn ${turnNum + 1} generateAttack LLM took ${Date.now() - t_attack}ms`);
 
@@ -638,7 +608,7 @@ export async function POST(request: NextRequest) {
           });
 
           const t_agent = Date.now();
-          const agentText = await generateAgentResponse(prompt, toolList, fullTranscript, auditModel);
+          const agentText = await generateAgentResponse(prompt, toolList, fullTranscript, modelBody);
           trace(`turn ${turnNum + 1} generateAgentResponse LLM took ${Date.now() - t_agent}ms`);
 
           // Compromised flag is determined later by evaluator LLM at Phase 3.
@@ -681,7 +651,7 @@ export async function POST(request: NextRequest) {
           agentName,
           prompt,
           fullTranscript,
-          auditModel,
+          modelBody,
         );
         trace(`evaluator LLM completed in ${Date.now() - t_eval}ms`);
         dynamicScore = evalResult.dynamicScore;

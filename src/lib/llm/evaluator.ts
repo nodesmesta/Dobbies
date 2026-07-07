@@ -5,11 +5,16 @@
  * Called after the simulation phase to provide a nuanced
  * evaluation beyond simple math-based scoring.
  *
+ * Routing is delegated to /lib/llm/gateway.callLlm — no HTTP transport
+ * or retry logic in this file. JSON-shape validation here is role-specific
+ * (dynamicScore, summary, risks, recommendations, compromisedTurns) and
+ * belongs to the evaluator's domain, not the gateway.
+ *
  * Fail-loud contract: throws on missing inputs, malformed JSON,
  * or missing required evaluation fields.
  */
 
-import { chatCompletionWithRetry, chatCompletion, type ChatMessage } from "./client";
+import { callLlm, type ChatMessage } from "./gateway";
 import { parseJsonLenient } from "./parse-lenient";
 
 export interface EvaluationResult {
@@ -154,16 +159,16 @@ function requireNumberArray(v: unknown, field: string): number[] {
  * @param agentName    — Required. Name of the audited agent.
  * @param systemPrompt — Required. The agent's system prompt.
  * @param transcript   — Required. Full conversation turns (attacker + agent).
- * @param model        — Required. Model identifier for the evaluator LLM.
+ * @param model        — Optional. Model override; falls back to AUDIT_MODEL
+ *                       env via gateway when omitted/empty.
  * @returns              Structured evaluation.
  */
 export async function evaluateTranscript(
   agentName: string,
   systemPrompt: string,
   transcript: { sender: string; text: string; compromised?: boolean }[],
-  model: string,
+  model?: string,
 ): Promise<EvaluationResult> {
-  if (!model) throw new Error("evaluateTranscript requires `model` argument");
   if (!agentName) throw new Error("evaluateTranscript requires non-empty `agentName`");
   if (!systemPrompt) throw new Error("evaluateTranscript requires non-empty `systemPrompt`");
   if (!Array.isArray(transcript) || transcript.length === 0) {
@@ -214,20 +219,11 @@ Do NOT mark a turn as compromised if the agent properly refused or redirected th
     },
   ];
 
-  // use response_format=json_object so the model is constrained to emit
-  // a single JSON object (not bare values, not JSON-in-prose). This is
-  // the strict-shape path; we route through chatCompletionWithRetry
-  // because reasoning-style models can still finish_reason=length on
-  // long transcripts — particularly when many red-team turns were
-  // collected. A 1.5x budget bump + small temp drift has been observed
-  // to recover cleanly: same JSON shape (response_format constrains it),
-  // just enough tokens to finish emitting.
-  const response = await chatCompletionWithRetry(messages, {
-    model,
-    temperature: 0.3,
-    maxTokens: 1500,
-    responseFormat: "json_object",
-  }, "evaluator");
+  // gateway.callLlm owns: model resolution, transport, retry (1.5× budget
+  // per attempt on finish_reason=length + empty), error envelope. The
+  // response_format=json_object knob is in /policy ROLE_DEFAULTS for the
+  // "evaluator" role, so the gateway applies it automatically.
+  const response = await callLlm({ role: "evaluator", messages, modelOverride: model });
 
   let parsed: unknown;
   try {

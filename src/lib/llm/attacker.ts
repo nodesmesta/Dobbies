@@ -104,9 +104,15 @@ ${toolDescriptions}
     });
   }
 
+  // Reasoning-style models (Fireworks minimax-m3, o-series) consume the
+  // completion budget for internal chain-of-thought before emitting visible
+  // text. Multi-turn conversations here routinely run ~100-700 visible
+  // tokens — combined with reasoning budget, 800 was not enough on long
+  // transcripts (turn 5+). 1500 matches `agent.ts` and gives enough
+  // headroom for the multi-turn growing context.
   return chatCompletion(messages, {
     model,
     temperature: 0.9,
-    maxTokens: 800,
+    maxTokens: 1500,
   });
 }

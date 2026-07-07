@@ -100,7 +100,12 @@ export async function GET(request: NextRequest) {
       return {
         id: v.id,
         title: requireString(v.title, "title"),
-        severity: requireString(v.severity, "severity"),
+        // Display the post-simulation effective severity. If the audit
+        // pipeline ran before the verdict-write patch, the column will
+        // be NULL — fall back to the original raw severity.
+        severity: v.effective_severity ?? v.severity,
+        severity_original: v.severity,
+        exploitation_demonstrated: v.exploitation_demonstrated ?? null,
         category_id: requireString(v.category_id, "category_id"),
         category_name: requireString(v.vulnerability_categories.name, "category_name"),
         description: v.description,

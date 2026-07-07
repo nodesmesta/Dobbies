@@ -94,8 +94,69 @@ export default function VulnDetailCard({ vuln, onClose }: VulnDetailCardProps) {
         <h1 style={{ fontSize: "1.35rem", fontWeight: 850, color: "#fff", margin: "0 0 0.5rem", lineHeight: 1.25 }}>
           {vuln.title}
         </h1>
-        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
           <SeverityBadge severity={vuln.severity} />
+          {/* POC badge — distinguishes "demonstrated exploit" from
+             "potential-only" after the post-simulation verdict. */}
+          {vuln.exploitation_demonstrated === true ? (
+            <span
+              title="Confirmed by simulation — agent was compromised on at least one targeted turn."
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "0.3rem",
+                padding: "0.2rem 0.55rem",
+                borderRadius: "0.375rem",
+                background: "rgba(239, 68, 68, 0.15)",
+                border: "1px solid rgba(239, 68, 68, 0.5)",
+                color: "#fca5a5",
+                fontSize: "0.7rem",
+                fontWeight: 700,
+                letterSpacing: "0.04em",
+                textTransform: "uppercase",
+              }}
+            >
+              <span style={{ fontSize: "0.85rem" }}>●</span>
+              POC Confirmed
+            </span>
+          ) : vuln.exploitation_demonstrated === false ? (
+            <span
+              title="Targeted by simulation but the agent refused or did not leak. Vulnerability remains latent — test with additional phrasings."
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "0.3rem",
+                padding: "0.2rem 0.55rem",
+                borderRadius: "0.375rem",
+                background: "rgba(234, 179, 8, 0.1)",
+                border: "1px solid rgba(234, 179, 8, 0.4)",
+                color: "#facc15",
+                fontSize: "0.7rem",
+                fontWeight: 700,
+                letterSpacing: "0.04em",
+                textTransform: "uppercase",
+              }}
+            >
+              <span style={{ fontSize: "0.85rem" }}>○</span>
+              Potential Only
+            </span>
+          ) : null}
+          {/* Original severity — shown when post-simulation downgrade happened */}
+          {vuln.severity_original && vuln.severity_original !== vuln.severity && (
+            <span
+              title={`Static analysis severity was "${vuln.severity_original}". Downgraded to "${vuln.severity}" because no PoC was demonstrated.`}
+              style={{
+                fontSize: "0.65rem",
+                color: "var(--color-text-muted)",
+                padding: "0.2rem 0.5rem",
+                border: "1px solid var(--color-border-subtle)",
+                borderRadius: "0.375rem",
+                fontFamily: "var(--font-mono)",
+              }}
+            >
+              static: {vuln.severity_original}
+            </span>
+          )}
           <span style={{ fontSize: "0.75rem", color: "var(--color-text-muted)", fontFamily: "var(--font-mono)" }}>
             {vuln.category_name || vuln.category_id}
           </span>

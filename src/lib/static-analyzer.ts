@@ -12,7 +12,7 @@
  *   - Unknown severity in LLM output throws
  *   - Empty `findings` array is a valid clean result, not a fallback
  */
-import { chatCompletion } from "@/lib/llm/client";
+import { chatCompletionWithRetry } from "@/lib/llm/client";
 import type { Severity } from "@/lib/audit/types";
 import securityRules from "@/lib/security-rules.json";
 import {
@@ -296,12 +296,21 @@ async function analyzePromptWithLLM(
 
   const userPrompt = buildAnalysisPrompt(systemPrompt, toolsDescription);
 
-  const response = await chatCompletion(
+  // Static analyzer emits a single JSON object containing a findings
+  // array. response_format=json_object constrains shape. We use the
+  // retry wrapper so a reasoning-style model that burns its budget on
+  // internal chain-of-thought during a verbose prompt gets up to two
+  // retries at 1.5x budget — same prompt context, message array
+  // untouched so output remains semantically equivalent. base cap is
+  // 6144 (4096 * 1.5) — well above attacker/agent so this caller has
+  // real headroom to recover from a single large system prompt.
+  const response = await chatCompletionWithRetry(
     [
       { role: "system", content: ANALYSIS_SYSTEM_PROMPT },
       { role: "user", content: userPrompt },
     ],
-    { model, temperature: 0.1, maxTokens: 4096, responseFormat: "json_object" }
+    { model, temperature: 0.1, maxTokens: 4096, responseFormat: "json_object" },
+    "static-analyzer",
   );
 
   let parsed: unknown;

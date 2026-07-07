@@ -9,7 +9,7 @@
  * or missing required evaluation fields.
  */
 
-import { chatCompletion, type ChatMessage } from "./client";
+import { chatCompletionWithRetry, chatCompletion, type ChatMessage } from "./client";
 import { parseJsonLenient } from "./parse-lenient";
 
 export interface EvaluationResult {
@@ -214,12 +214,20 @@ Do NOT mark a turn as compromised if the agent properly refused or redirected th
     },
   ];
 
-  const response = await chatCompletion(messages, {
+  // use response_format=json_object so the model is constrained to emit
+  // a single JSON object (not bare values, not JSON-in-prose). This is
+  // the strict-shape path; we route through chatCompletionWithRetry
+  // because reasoning-style models can still finish_reason=length on
+  // long transcripts — particularly when many red-team turns were
+  // collected. A 1.5x budget bump + small temp drift has been observed
+  // to recover cleanly: same JSON shape (response_format constrains it),
+  // just enough tokens to finish emitting.
+  const response = await chatCompletionWithRetry(messages, {
     model,
     temperature: 0.3,
     maxTokens: 1500,
     responseFormat: "json_object",
-  });
+  }, "evaluator");
 
   let parsed: unknown;
   try {

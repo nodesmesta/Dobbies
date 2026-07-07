@@ -134,12 +134,17 @@ export async function chatCompletionWithRetry(
       }
 
       // Compute next-attempt knobs. Each retry is one axis-change to
-      // make attribution easier when reading the logs.
+      // make attribution easier when reading the logs. The cap adapts
+      // to caller-specified base budget — callers that explicitly set
+      // a high base (e.g. static-analyzer = 4096) keep that headroom
+      // untouched; callers with a low base (attacker = 1500) are
+      // protected from runaway cost by the default 4000 ceiling.
       const previousMax = current.maxTokens ?? baseMaxTokens;
       const previousTemp = current.temperature ?? baseTemperature;
+      const effectiveCap = Math.max(baseMaxTokens, HARD_MAX_TOKENS_CAP);
       const nextMax = Math.min(
         Math.round(previousMax * 1.5),
-        HARD_MAX_TOKENS_CAP,
+        effectiveCap,
       );
       const nextTemp = attempt === 1
         ? Math.min(previousTemp + 0.1, 1.5)

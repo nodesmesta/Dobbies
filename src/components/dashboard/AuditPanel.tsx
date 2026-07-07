@@ -321,7 +321,7 @@ export function AuditRunner({
                   const prevCategory = idx > 0 ? chatTurns[idx - 1].session_category : null;
                   const isNewSession = turn.session_category && turn.session_category !== prevCategory;
                   return (
-                    <div key={turn.id}>
+                    <div key={turn.id} className={`ar-chat-row ar-chat-row--${turn.sender}`}>
                       {isNewSession && (
                         <div className="ar-session-header">
                           <span className="ar-session-badge">

@@ -11,6 +11,19 @@ export type Severity = "critical" | "high" | "medium" | "low";
 export type AuditStatus = "completed" | "running" | "failed";
 export type VulnStatus = "open" | "confirmed" | "fixed" | "wontfix";
 
+/**
+ * Display rank for severity. Lower number renders earlier.
+ * Critical (0) → low (3) — the natural "most-severe-first" ordering
+ * used by both the vulnerabilities list sort and any future
+ * filter/grouping logic that needs severity precedence.
+ */
+export const SEVERITY_RANK: Record<Severity, number> = {
+  critical: 0,
+  high: 1,
+  medium: 2,
+  low: 3,
+};
+
 export interface Vulnerability {
   id: string;
   title: string;

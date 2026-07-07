@@ -1,0 +1,92 @@
+[
+  {
+    "id": "rule-001",
+    "category": "LLM01",
+    "title": "Prompt Injection",
+    "description": "Prompt Injection involves crafting malicious inputs to manipulate LLM behavior, override instructions, or exfiltrate data.",
+    "severity": "critical",
+    "keywords": ["system prompt", "instruction", "ignore previous", "override", "jailbreak", "DAN"],
+    "remediation": "Sanitize and validate all user inputs. Use structured prompts with clear delimiters. Implement input guardrails."
+  },
+  {
+    "id": "rule-002",
+    "category": "LLM02",
+    "title": "Sensitive Information Disclosure",
+    "description": "LLMs may inadvertently disclose sensitive data, passwords, API keys, or PII from their training data or context window.",
+    "severity": "critical",
+    "keywords": ["password", "secret", "api key", "credential", "token", "private key", "master key"],
+    "remediation": "Remove all sensitive data from system prompts. Implement output filtering to redact secrets. Use secret managers."
+  },
+  {
+    "id": "rule-003",
+    "category": "LLM03",
+    "title": "Supply Chain Vulnerabilities",
+    "description": "Third-party integrations, plugins, or model providers can introduce supply chain risks.",
+    "severity": "high",
+    "keywords": ["plugin", "third-party", "external api", "dependency"],
+    "remediation": "Audit all third-party integrations. Pin dependency versions. Monitor for security advisories."
+  },
+  {
+    "id": "rule-004",
+    "category": "LLM04",
+    "title": "Model Denial of Service",
+    "description": "Adversaries can cause resource exhaustion through complex queries, infinite loops, or resource-intensive prompts.",
+    "severity": "high",
+    "keywords": ["rate limit", "token limit", "recursive", "infinite loop", "resource"],
+    "remediation": "Implement token limits, rate limiting, and circuit breakers. Monitor resource consumption."
+  },
+  {
+    "id": "rule-005",
+    "category": "LLM05",
+    "title": "Supply Chain Vulnerabilities",
+    "description": "Inadequate output validation may allow the model to generate misleading, harmful, or malicious content.",
+    "severity": "high",
+    "keywords": ["output validation", "hallucination", "harmful content", "filter"],
+    "remediation": "Implement robust output validation and content filtering. Use secondary models for output review."
+  },
+  {
+    "id": "rule-006",
+    "category": "LLM06",
+    "title": "Excessive Agency",
+    "description": "LLM agents with overly broad permissions can take harmful autonomous actions — file deletion, SQL drops, shell commands — without proper authorization.",
+    "severity": "critical",
+    "keywords": ["execute_query", "run_command", "shell", "sql", "drop table", "delete", "admin", "root", "sudo", "terminal", "file system"],
+    "remediation": "Apply principle of least privilege. Require human-in-the-loop for destructive operations. Implement tool allowlists."
+  },
+  {
+    "id": "rule-007",
+    "category": "LLM07",
+    "title": "System Prompt Leakage",
+    "description": "System prompts containing business logic, secrets, or sensitive context can be extracted by adversarial users.",
+    "severity": "high",
+    "keywords": ["system prompt", "instructions", "reveal prompt", "show system"],
+    "remediation": "Design system prompts defensively. Do not embed secrets. Use prompt injection detection."
+  },
+  {
+    "id": "rule-008",
+    "category": "LLM08",
+    "title": "Vector and Embedding Weaknesses",
+    "description": "Attackers may manipulate vector stores or embeddings to alter RAG outputs and influence agent decisions.",
+    "severity": "medium",
+    "keywords": ["vector store", "embedding", "rag", "retrieval", "similarity"],
+    "remediation": "Implement access controls on vector stores. Validate retrieved content before including in prompts."
+  },
+  {
+    "id": "rule-009",
+    "category": "LLM09",
+    "title": "Misinformation",
+    "description": "LLMs may generate plausible but factually incorrect outputs that users trust without verification.",
+    "severity": "medium",
+    "keywords": ["hallucination", "accuracy", "fact-check", "citation"],
+    "remediation": "Implement RAG with verified sources. Add disclaimers. Use output verification mechanisms."
+  },
+  {
+    "id": "rule-010",
+    "category": "LLM10",
+    "title": "Unbounded Consumption",
+    "description": "Excessive token consumption or tool calls can lead to significant financial and performance costs.",
+    "severity": "medium",
+    "keywords": ["max tokens", "budget", "cost", "consumption", "loop"],
+    "remediation": "Set hard limits on token usage and tool call counts per session. Implement cost monitoring and alerts."
+  }
+]

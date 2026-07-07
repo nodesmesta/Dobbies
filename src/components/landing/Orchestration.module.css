@@ -1,0 +1,665 @@
+/* ─── Orchestration Section ───────────────────────── */
+.orchestrationSection {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  padding: 6rem 2rem;
+  max-width: 1200px;
+  margin: 0 auto;
+  box-sizing: border-box;
+  position: relative;
+  scroll-margin-top: 88px;
+}
+
+/* ─── Section Header (sticky — stays visible while scrolling steps) ─── */
+.sectionHeader {
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+}
+
+.sectionHeadline {
+  font-size: clamp(1.6rem, 3vw, 2.4rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--text-primary);
+  margin-bottom: 1rem;
+  line-height: 1.2;
+}
+
+.sectionSubtext {
+  font-size: 1rem;
+  color: var(--text-secondary);
+  max-width: 560px;
+  line-height: 1.7;
+}
+
+.sectionLabel {
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent-blue);
+  margin-bottom: 1rem;
+}
+
+/* ─── Two-Column Flex Container ─────────────────────── */
+.orchestrationContainer {
+  display: flex;
+  gap: 4rem;
+  align-items: flex-start;
+  width: 100%;
+}
+
+/* ─── Left Column: Rotating Wheel Flowchart ──────────── */
+.wheelOuter {
+  position: sticky;
+  top: 100px;
+  width: 35%;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding-top: 1rem;
+}
+
+/* Wheel container — holds SVG + absolutely-positioned nodes */
+.wheelContainer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* SVG track layer — sits behind the nodes */
+.wheelSvg {
+  position: absolute;
+  inset: 0;
+}
+
+/* Each orbiting node */
+.wheelNode {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  cursor: pointer;
+  transition: transform 0.55s cubic-bezier(0.34, 1.56, 0.64, 1);
+  z-index: 2;
+  outline: none;
+}
+
+.wheelNode:focus-visible .wheelNodeCircle {
+  outline: 2px solid var(--color-accent-green);
+  outline-offset: 4px;
+}
+
+/* The circular node itself */
+.wheelNodeCircle {
+  width: 58px;
+  height: 58px;
+  border-radius: 50%;
+  background: var(--color-surface-1);
+  border: 1.5px solid rgba(255, 255, 255, 0.15);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+
+.wheelNodeCircle:hover {
+  border-color: rgba(255, 255, 255, 0.3);
+  background: var(--color-surface-2);
+  transform: scale(1.08);
+}
+
+.wheelNodeCircleActive {
+  border-color: var(--color-accent-green);
+  background: var(--color-surface-2);
+  box-shadow:
+    0 0 24px rgba(52, 211, 153, 0.3),
+    inset 0 0 16px rgba(52, 211, 153, 0.05);
+  transform: scale(1.12);
+}
+
+.wheelNodeCircleActive:hover {
+  transform: scale(1.16);
+}
+
+.wheelNodeCircleDanger {
+  border-color: #ef4444;
+  background: var(--color-surface-2);
+  box-shadow:
+    0 0 24px rgba(239, 68, 68, 0.3),
+    inset 0 0 16px rgba(239, 68, 68, 0.05);
+  transform: scale(1.12);
+}
+
+.wheelNodeCircleDanger:hover {
+  transform: scale(1.16);
+}
+
+/* Small inner icon ring */
+.wheelNodeIcon {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  transition: all 0.4s ease;
+}
+
+.wheelNodeCircleActive .wheelNodeIcon {
+  background: rgba(52, 211, 153, 0.15);
+  border-color: rgba(52, 211, 153, 0.35);
+  color: var(--color-accent-green);
+  box-shadow: 0 0 10px rgba(52, 211, 153, 0.2);
+}
+
+.wheelNodeCircleDanger .wheelNodeIcon {
+  background: rgba(239, 68, 68, 0.15);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: var(--accent-red);
+  box-shadow: 0 0 10px rgba(239, 68, 68, 0.2);
+}
+
+/* Label beneath each node */
+.wheelNodeLabel {
+  font-size: 0.65rem;
+  font-weight: 600;
+  font-family: var(--font-mono);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  transition: color 0.4s ease;
+  white-space: nowrap;
+}
+
+.wheelNodeCircleActive ~ .wheelNodeLabel {
+  color: var(--color-accent-green);
+}
+
+.wheelNodeCircleDanger ~ .wheelNodeLabel {
+  color: var(--accent-red);
+}
+
+/* ─── Right Column: Scrollable Steps ───────────────── */
+.orchestrationScroll {
+  display: flex;
+  flex-direction: column;
+  gap: 4.5rem;
+  padding-bottom: 20vh;
+  width: 65%;
+  flex-shrink: 0;
+  /* allow connector lines to visually extend into the gap between steps */
+  overflow: visible;
+}
+
+/* Individual pipeline step */
+.pipelineStep {
+  display: grid;
+  grid-template-columns: 40px 32px 1fr;
+  gap: 0;
+  min-height: 60vh;
+  align-items: stretch;
+  transition:
+    opacity 0.5s cubic-bezier(0.4, 0, 0.2, 1),
+    transform 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  opacity: 0;
+  transform: translateY(15px);
+  pointer-events: none;
+  position: relative;
+  /* allow connector lines to extend into adjacent step gaps */
+  overflow: visible;
+}
+
+/* Active state classes */
+.pipelineStepActive,
+.pipelineStepActiveWarning,
+.pipelineStepActiveCompromised {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+}
+
+/* ─── Vertical Flow Column (badge + connectors) ───── */
+.pipelineFlowCol {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  /* stretch to full row height so connectors can fill top/bottom */
+  align-self: stretch;
+  position: relative;
+  overflow: visible;
+}
+
+/* Circle badge with checkmark */
+.pipelineStepBadge {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  font-weight: 700;
+  font-family: var(--font-mono);
+  color: var(--text-secondary);
+  transition: all 0.3s ease;
+  /* center badge vertically within the flex column */
+  margin-top: auto;
+  margin-bottom: auto;
+  position: relative;
+  z-index: 2;
+  box-shadow: 0 0 15px rgba(0, 0, 0, 0.4);
+}
+
+.pipelineStepActive .pipelineStepBadge {
+  background: rgba(52, 211, 153, 0.08);
+  border-color: var(--color-accent-green);
+  color: var(--color-accent-green);
+  box-shadow:
+    0 0 20px rgba(52, 211, 153, 0.2),
+    inset 0 0 8px rgba(52, 211, 153, 0.1);
+}
+
+.pipelineStepActiveWarning .pipelineStepBadge {
+  background: rgba(251, 191, 36, 0.08);
+  border-color: #fbbf24;
+  color: #fbbf24;
+  box-shadow:
+    0 0 20px rgba(251, 191, 36, 0.2),
+    inset 0 0 8px rgba(251, 191, 36, 0.1);
+}
+
+.pipelineStepActiveCompromised .pipelineStepBadge {
+  background: rgba(239, 68, 68, 0.08);
+  border-color: #ef4444;
+  color: #ef4444;
+  box-shadow:
+    0 0 20px rgba(239, 68, 68, 0.2),
+    inset 0 0 8px rgba(239, 68, 68, 0.1);
+}
+
+/*
+ * Connector lines use flex: 1 so they grow to fill space above/below the badge.
+ * Negative margin + matching padding bridges the gap between steps so the
+ * line appears continuous across the 4.5rem gap in orchestrationScroll.
+ */
+
+/* Line above the badge — grows upward to top of row, then bridges gap */
+.pipelineConnectorIncoming {
+  flex: 1 0 0;
+  width: 2px;
+  /* pull upward into the gap between this step and the previous one */
+  margin-top: -4.5rem;
+  padding-top: 4.5rem;
+  background: rgba(255, 255, 255, 0.06);
+  transition: background 0.3s ease, box-shadow 0.3s ease;
+}
+
+.pipelineStepActive .pipelineConnectorIncoming {
+  background: var(--color-accent-green);
+  box-shadow: 0 0 8px rgba(52, 211, 153, 0.5);
+}
+
+.pipelineStepActiveWarning .pipelineConnectorIncoming {
+  background: #fbbf24;
+  box-shadow: 0 0 8px rgba(251, 191, 36, 0.5);
+}
+
+.pipelineStepActiveCompromised .pipelineConnectorIncoming {
+  background: #ef4444;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+}
+
+/* Line below the badge — grows downward to bottom of row, then bridges gap */
+.pipelineConnectorOutgoing {
+  flex: 1 0 0;
+  width: 2px;
+  /* pull downward into the gap between this step and the next one */
+  margin-bottom: -4.5rem;
+  padding-bottom: 4.5rem;
+  background: rgba(255, 255, 255, 0.06);
+  transition: background 0.3s ease, box-shadow 0.3s ease;
+}
+
+.pipelineStepActive .pipelineConnectorOutgoing {
+  background: var(--color-accent-green);
+  box-shadow: 0 0 8px rgba(52, 211, 153, 0.5);
+}
+
+.pipelineStepActiveWarning .pipelineConnectorOutgoing {
+  background: #fbbf24;
+  box-shadow: 0 0 8px rgba(251, 191, 36, 0.5);
+}
+
+.pipelineStepActiveCompromised .pipelineConnectorOutgoing {
+  background: #ef4444;
+  box-shadow: 0 0 8px rgba(239, 68, 68, 0.5);
+}
+
+/* ─── Horizontal Connector (arrow between cols) ────── */
+.pipelineHorizontalConnector {
+  height: 2px;
+  background: rgba(255, 255, 255, 0.06);
+  position: relative;
+  transition: all 0.3s ease;
+  align-self: center;
+}
+
+.pipelineHorizontalConnector::after {
+  content: "";
+  position: absolute;
+  right: -2px;
+  top: -3px;
+  width: 0;
+  height: 0;
+  border-style: solid;
+  border-width: 4px 0 4px 6px;
+  border-color: transparent transparent transparent rgba(255, 255, 255, 0.06);
+  transition: all 0.3s ease;
+}
+
+.pipelineStepActive .pipelineHorizontalConnector {
+  background: var(--color-accent-green);
+  box-shadow: 0 0 6px var(--color-accent-green);
+}
+
+.pipelineStepActive .pipelineHorizontalConnector::after {
+  border-color: transparent transparent transparent var(--color-accent-green);
+}
+
+.pipelineStepActiveWarning .pipelineHorizontalConnector {
+  background: #fbbf24;
+  box-shadow: 0 0 6px #fbbf24;
+}
+
+.pipelineStepActiveWarning .pipelineHorizontalConnector::after {
+  border-color: transparent transparent transparent #fbbf24;
+}
+
+.pipelineStepActiveCompromised .pipelineHorizontalConnector {
+  background: #ef4444;
+  box-shadow: 0 0 6px #ef4444;
+}
+
+.pipelineStepActiveCompromised .pipelineHorizontalConnector::after {
+  border-color: transparent transparent transparent #ef4444;
+}
+
+/* ─── Content Column (HUD frame with corner ticks) ─── */
+.pipelineContentCol {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+  position: relative;
+  background: rgba(8, 12, 22, 0.15);
+  border: 1px dashed rgba(255, 255, 255, 0.04);
+  border-radius: var(--radius-md);
+  padding: 1.25rem;
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  box-sizing: border-box;
+  justify-content: center;
+  align-self: center;
+}
+
+/* Corner ticks */
+.pipelineContentCol::before,
+.pipelineContentCol::after {
+  content: "";
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-color: rgba(255, 255, 255, 0.08);
+  border-style: solid;
+  transition: all 0.4s ease;
+}
+
+.pipelineContentCol::before {
+  top: -1px;
+  left: -1px;
+  border-width: 2px 0 0 2px;
+}
+
+.pipelineContentCol::after {
+  bottom: -1px;
+  right: -1px;
+  border-width: 0 2px 2px 0;
+}
+
+/* Active state ─ green */
+.pipelineStepActive .pipelineContentCol {
+  border-color: rgba(52, 211, 153, 0.15);
+  background: rgba(52, 211, 153, 0.02);
+  box-shadow:
+    0 15px 35px -10px rgba(0, 0, 0, 0.5),
+    inset 0 0 20px rgba(52, 211, 153, 0.01);
+}
+
+.pipelineStepActive .pipelineContentCol::before,
+.pipelineStepActive .pipelineContentCol::after {
+  border-color: var(--color-accent-green);
+  filter: drop-shadow(0 0 5px var(--color-accent-green));
+}
+
+/* Active state ─ warning (amber) */
+.pipelineStepActiveWarning .pipelineContentCol {
+  border-color: rgba(251, 191, 36, 0.15);
+  background: rgba(251, 191, 36, 0.02);
+  box-shadow:
+    0 15px 35px -10px rgba(0, 0, 0, 0.5),
+    inset 0 0 20px rgba(251, 191, 36, 0.01);
+}
+
+.pipelineStepActiveWarning .pipelineContentCol::before,
+.pipelineStepActiveWarning .pipelineContentCol::after {
+  border-color: #fbbf24;
+  filter: drop-shadow(0 0 5px #fbbf24);
+}
+
+/* Active state ─ danger (red) */
+.pipelineStepActiveCompromised .pipelineContentCol {
+  border-color: rgba(239, 68, 68, 0.15);
+  background: rgba(239, 68, 68, 0.02);
+  box-shadow:
+    0 15px 35px -10px rgba(0, 0, 0, 0.5),
+    inset 0 0 20px rgba(239, 68, 68, 0.01);
+}
+
+.pipelineStepActiveCompromised .pipelineContentCol::before,
+.pipelineStepActiveCompromised .pipelineContentCol::after {
+  border-color: #ef4444;
+  filter: drop-shadow(0 0 5px #ef4444);
+}
+
+/* ─── Step Content ─────────────────────────────────── */
+.pipelineStepHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  flex-wrap: wrap;
+}
+
+.pipelineStepNumber {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: var(--color-accent-green);
+  background: rgba(52, 211, 153, 0.08);
+  border: 1px solid rgba(52, 211, 153, 0.2);
+  padding: 0.15rem 0.5rem;
+  border-radius: 99px;
+  letter-spacing: 0.05em;
+  flex-shrink: 0;
+}
+
+.pipelineStepActiveWarning .pipelineStepNumber {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.08);
+  border-color: rgba(251, 191, 36, 0.25);
+}
+
+.pipelineStepActiveCompromised .pipelineStepNumber {
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.08);
+  border-color: rgba(239, 68, 68, 0.25);
+}
+
+.pipelineStepTitle {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: -0.02em;
+  line-height: 1.3;
+  margin-top: 0.5rem;
+}
+
+.pipelineStepSubtitle {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  font-weight: 500;
+  margin-top: -0.25rem;
+  padding-bottom: 0.25rem;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.pipelineStepDesc {
+  font-size: 0.825rem;
+  color: var(--text-secondary);
+  line-height: 1.65;
+  margin-bottom: 0.25rem;
+}
+
+/* ─── Status Badges ────────────────────────────── */
+.stepStatusBadgeActive {
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.1);
+  border: 1px solid rgba(52, 211, 153, 0.2);
+  padding: 0.15rem 0.55rem;
+  border-radius: 99px;
+}
+
+.stepStatusBadgeCompromised {
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  padding: 0.15rem 0.55rem;
+  border-radius: 99px;
+}
+
+.stepStatusBadgeWarning {
+  font-size: 0.6rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.1);
+  border: 1px solid rgba(251, 191, 36, 0.2);
+  padding: 0.15rem 0.55rem;
+  border-radius: 99px;
+}
+
+/* ─── Responsive: tablet and below ─────────────────── */
+@media (max-width: 900px) {
+  .orchestrationContainer {
+    grid-template-columns: 1fr;
+    gap: 2rem;
+  }
+
+  .wheelOuter {
+    position: static;
+    padding-top: 0;
+  }
+
+  .orchestrationScroll {
+    gap: 2rem;
+    padding-bottom: 2rem;
+  }
+
+  .pipelineStep {
+    min-height: auto;
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
+    grid-template-columns: 32px 24px 1fr;
+  }
+
+  .pipelineStepBadge {
+    width: 32px;
+    height: 32px;
+  }
+
+  .pipelineContentCol {
+    padding: 1rem;
+  }
+
+  .pipelineStepDesc {
+    font-size: 0.8rem;
+  }
+}
+
+@media (max-width: 640px) {
+  .orchestrationSection {
+    padding: 4rem 1.25rem;
+  }
+
+  .pipelineStep {
+    grid-template-columns: 28px 16px 1fr;
+    gap: 0;
+  }
+
+  .pipelineStepBadge {
+    width: 28px;
+    height: 28px;
+  }
+
+  .pipelineStepBadge svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .pipelineHorizontalConnector {
+    width: 12px;
+    min-width: 12px;
+  }
+
+  .pipelineStepHeader {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+
+  .pipelineStepTitle {
+    font-size: 1rem;
+  }
+
+  .wheelContainer {
+    transform: scale(0.72);
+    transform-origin: center center;
+  }
+
+  .wheelNodeLabel {
+    font-size: 0.55rem;
+  }
+}

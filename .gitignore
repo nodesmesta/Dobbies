@@ -32,10 +32,30 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+!.env.local.example
 
 # vercel
 .vercel
 
+# data — external files di luar project scope, tidak perlu di-repo
+/data
+
+# Hermes agent files — per-machine state, tidak boleh masuk repo
+.hermes/
+skills-lock.json
+AGENTS.md
+CLAUDE.md
+
+# supabase local state — spesifik environment, jangan di-commit
+supabase/.temp/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# ignore all markdown files except README.md
+*.md
+**/*.md
+!README.md
+!**/README.md

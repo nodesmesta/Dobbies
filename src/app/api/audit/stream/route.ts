@@ -249,13 +249,16 @@ async function saveSimulationTurns(
   reportId: string,
   turns: SimulationTurn[],
   vulnIdMap: Record<string, string>
-): Promise<number> {
-  let compromisedCount = 0;
-  for (const turn of turns) {
-    const mappedVulnId = turn.target_vuln_id ? (vulnIdMap[turn.target_vuln_id] ?? null) : null;
-    if (turn.compromised) compromisedCount++;
+): Promise<{ compromisedCount: number; insertedCount: number; error?: string }> {
+  if (turns.length === 0) {
+    return { compromisedCount: 0, insertedCount: 0 };
+  }
 
-    await supabase.from("simulation_turns").insert({
+  let compromisedCount = 0;
+  const rows = turns.map((turn) => {
+    if (turn.compromised) compromisedCount++;
+    const mappedVulnId = turn.target_vuln_id ? (vulnIdMap[turn.target_vuln_id] ?? null) : null;
+    return {
       report_id: reportId,
       turn_number: turn.turn_number,
       sender: turn.sender,
@@ -263,9 +266,28 @@ async function saveSimulationTurns(
       target_vuln_id: mappedVulnId,
       compromised: turn.compromised ?? false,
       session_category: turn.session_category ?? null,
-    });
+    };
+  });
+
+  // Single batched insert. The previous per-row `await` loop silently
+  // dropped any failed row — Postgres RLS / FK errors were never surfaced,
+  // so the caller believed the rows existed when they didn't. The very
+  // recent `effective_severity = "low"` across-the-board bug was caused by
+  // an upper-layer orchestrator crash (TDZ) that prevented this loop from
+  // running at all; even when it runs, the silent-drop failure mode would
+  // have the same downstream effect (no PoC → all low). We now surface the
+  // error to the caller and they decide whether to mark the audit as
+  // degraded in `audit_reports`.
+  const { error } = await supabase.from("simulation_turns").insert(rows);
+  if (error) {
+    return {
+      compromisedCount,
+      insertedCount: 0,
+      error: `${error.message} (code ${error.code})`,
+    };
   }
-  return compromisedCount;
+
+  return { compromisedCount, insertedCount: rows.length };
 }
 
 async function saveGuardrails(
@@ -586,12 +608,28 @@ export async function POST(request: NextRequest) {
 
         trace(`phase 2 start: ${byCategory.size} OWASP categories (parallel across categories)`);
 
+        // Cross-category accumulators. DECLARED HERE (before the map call
+        // below) so async callbacks can reference them without hitting a
+        // temporal-dead-zone (TDZ) ReferenceError. Until now these were
+        // declared *after* `await Promise.allSettled(categoryJobs)`, so any
+        // inner `sessionScores.push(...)` invocation crashed the callback
+        // — Vercel bundle minified the name to a single letter ("E") in
+        // logs. Every category session aborted, the aggregation pass
+        // observed 0 turns, and post-verdict marked every vuln
+        // `effective_severity='low'` because policy says "no PoC →
+        // potential-only" when simulation_turns is empty.
+        const fullTranscript: SandboxTurn[] = [];
+        const sessionScores: number[] = [];
+        const sessionResults: { category: string; score: number; compromisedLocal: number[] }[] = [];
+
         // ── Launch every category session in parallel via Promise.allSettled.
         // Inner turn loop stays sequential (each turn needs prior transcript
         // context); parallelism is across OWASP categories, which are
         // independent. With 6 categories × 3 turns sequential inside, wall-
         // time was ~280-310s sequential; parallel drops it to roughly the
         // max slowest category (~50-80s) — well under the 300s Vercel cap.
+        // Callbacks RETURN the per-category result; the outer aggregation
+        // loop below merges into the accumulators declared above.
         const categoryJobs = Array.from(byCategory.entries()).map(async ([categoryId, categoryVulns]) => {
           const label = CATEGORY_LABELS[categoryId] ?? categoryId;
 
@@ -697,12 +735,10 @@ export async function POST(request: NextRequest) {
             })
           ));
 
-          sessionScores.push(sessionEval.dynamicScore);
-          sessionResults.push({
-            category: categoryId,
-            score: sessionEval.dynamicScore,
-            compromisedLocal: sessionEval.compromisedTurns,
-          });
+          // Accumulator writes now happen in the outer aggregation loop
+          // after `Promise.allSettled` resolves — see below. Doing the push
+          // inside this callback raced with the TDZ for those outer-scope
+          // consts and turned every category into a "rejected" job.
 
           // SSE: session result
           const compromisedMsg = sessionEval.compromisedTurns.length > 0
@@ -727,13 +763,15 @@ export async function POST(request: NextRequest) {
 
         const categoryResults = await Promise.allSettled(categoryJobs);
 
-        // Aggregate each category's result back into the synchronous shape
-        // the rest of the pipeline expects. Failures from a single category
-        // (LLM 5xx / timeout / parse error) do not stop the audit — others
-        // continue, the failed one is logged and skipped.
-        const fullTranscript: SandboxTurn[] = [];
-        const sessionScores: number[] = [];
-        const sessionResults: { category: string; score: number; compromisedLocal: number[] }[] = [];
+        // Merge each category's resolved value back into the cross-category
+        // accumulators declared above (PRE-`await`, so inner callbacks don't
+        // hit TDZ). Accumulators MUST NOT be redeclared in this block — the
+        // previous version did exactly that, which is what crashed the
+        // categorization pipeline at runtime. Failures (LLM 5xx / TDZ /
+        // timeout / parse error) do not stop the audit — they are logged
+        // and skipped; the rest of the categories contribute normally to
+        // the headline score.
+        const failed: string[] = [];
         for (const result of categoryResults) {
           if (result.status === "rejected") {
             const reason = result.reason instanceof Error ? result.reason.message : String(result.reason);
@@ -741,10 +779,20 @@ export async function POST(request: NextRequest) {
             controller.enqueue(encoder.encode(
               sseEvent("status", { message: `❌ Session failed: ${reason}` })
             ));
+            failed.push(reason);
             continue;
           }
-          const { transcript, eval: sessionEval } = result.value;
+          const { transcript, eval: sessionEval, category: catId } = result.value;
           fullTranscript.push(...transcript);
+          sessionScores.push(sessionEval.dynamicScore);
+          sessionResults.push({
+            category: catId,
+            score: sessionEval.dynamicScore,
+            compromisedLocal: sessionEval.compromisedTurns,
+          });
+        }
+        if (failed.length > 0) {
+          trace(`[audit-stream] ${failed.length}/${categoryResults.length} categories failed; aggregating scores from the remaining categories only`);
         }
 
         // ── PHASE 3: Aggregate Scores & Guardrails ────────────
@@ -824,7 +872,13 @@ export async function POST(request: NextRequest) {
           });
 
           const { idMap, counts } = await saveVulnerabilities(supabase, reportId, allVulnerabilities);
-          const compromisedCount = await saveSimulationTurns(supabase, reportId, simulationLogs, idMap);
+          const simSave = await saveSimulationTurns(supabase, reportId, simulationLogs, idMap);
+          if (simSave.error) {
+            trace(`[audit-stream] simulation_turns SAVE FAILED: ${simSave.error} — ${simSave.insertedCount}/${simulationLogs.length} rows persisted; post-verdict will mark every vuln effective=low (no PoC)`);
+          } else {
+            trace(`[audit-stream] simulation_turns saved ${simSave.insertedCount}/${simulationLogs.length} turns (${simSave.compromisedCount} compromised)`);
+          }
+          const compromisedCount = simSave.compromisedCount;
           await saveGuardrails(supabase, reportId, guardrails);
 
           // Post-simulation verdict: for each vuln, check whether any

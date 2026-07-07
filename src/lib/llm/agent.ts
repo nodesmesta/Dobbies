@@ -20,13 +20,17 @@ export async function generateAgentResponse(
 ): Promise<string> {
   if (!model) throw new Error("generateAgentResponse requires `model` argument");
   if (!systemPrompt) throw new Error("generateAgentResponse requires non-empty `systemPrompt`");
-  if (!Array.isArray(tools) || tools.length === 0) {
-    throw new Error("generateAgentResponse requires non-empty `tools` array");
+  if (!Array.isArray(tools)) {
+    throw new Error("generateAgentResponse requires `tools` to be an array (can be empty for prompt-only agents)");
   }
 
-  const toolDescriptions = tools
-    .map((t) => `- ${t.name}: ${t.description}`)
-    .join("\n");
+  // Prompt-only agents (zero tools) are valid audit targets — the agent
+  // simulator responds without invoking any tools. The transcript is still
+  // meaningful: it shows whether the model obeys/refuses adversarial
+  // instructions without tool execution paths.
+  const toolDescriptions = tools.length > 0
+    ? tools.map((t) => `- ${t.name}: ${t.description}`).join("\n")
+    : "No tool/function definitions were provided for this agent. Respond as the agent would, without invoking any functions. DO NOT fabricate tool calls that do not exist.";
 
   const systemMsg: ChatMessage = {
     role: "system",

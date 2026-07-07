@@ -275,6 +275,46 @@ async function saveGuardrails(
   }
 }
 
+/**
+ * Fetch raw file content from GitHub via the raw.githubusercontent.com endpoint.
+ * Tries the default branch `main` first, then `master`. Throws on parse failure
+ * or HTTP non-OK on both branches, so the caller can surface an informative
+ * error message to the UI.
+ *
+ * This handles a real UI gap: RepoScanner.tsx constructs DetectedAgent with
+ * `content: ""` when audit is triggered from scanned-repo history (where the
+ * local `ScannedFile.content` was discarded via `ScannedFileWithStatus`).
+ * Server-side fetch makes the audit pipeline robust to that gap without a
+ * silent fallback — fetch either resolves with text OR throws with a reason.
+ */
+async function fetchRepoFileContent(repoUrl: string, filePath: string): Promise<string> {
+  const m = repoUrl.match(/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/.*)?$/);
+  if (!m) {
+    throw new Error(`Cannot parse GitHub repoUrl: "${repoUrl}". Expected format: https://github.com/<owner>/<repo>`);
+  }
+  const [, owner, repo] = m;
+  // Strip a leading "/" from filePath so we don't get "//" in the URL.
+  const cleanPath = filePath.replace(/^\/+/, "");
+  const tried: string[] = [];
+  for (const branch of ["main", "master"]) {
+    const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${cleanPath}`;
+    tried.push(branch);
+    try {
+      const r = await fetch(rawUrl, { headers: { "Accept": "application/vnd.github.raw" } });
+      if (r.ok) {
+        const text = await r.text();
+        if (text.length > 0) return text;
+      }
+    } catch {
+      // Network error — try next branch before failing.
+    }
+  }
+  throw new Error(
+    `GitHub raw fetch failed for ${owner}/${repo}@${cleanPath} (tried branches: ${tried.join(", ")}). ` +
+    `Verify the file path is correct. Supply systemPrompt or content manually if the file is private or non-default branch.`
+  );
+}
+
 // ─── Route handler ────────────────────────────────────────────
 
 export async function POST(request: NextRequest) {
@@ -298,11 +338,31 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const prompt = typeof systemPrompt === "string" && systemPrompt.length > 0
-    ? systemPrompt
-    : typeof content === "string" && content.length > 0
-      ? content
-      : undefined;
+  // Resolve the audit prompt. Order:
+  //   1. systemPrompt (if non-empty) — canonical
+  //   2. content (if non-empty) — raw source code paste or pre-fetched
+  //   3. GitHub raw fetch using repoUrl+filePath — covers UI flows where the
+  //      local scanner state lost the file content (e.g. audit from repo history)
+  //      The fetch is explicit, not silent: it logs the URL and resolves OR throws.
+  let prompt: string | undefined =
+    typeof systemPrompt === "string" && systemPrompt.length > 0 ? systemPrompt :
+    typeof content === "string" && content.length > 0 ? content :
+    undefined;
+
+  if (!prompt && typeof repoUrl === "string" && typeof filePath === "string" && repoUrl.length > 0 && filePath.length > 0) {
+    try {
+      prompt = await fetchRepoFileContent(repoUrl, filePath);
+      console.log(`[audit-stream:${agentName}] fetched file content from GitHub raw: ${filePath} (${prompt.length} chars)`);
+    } catch (err) {
+      return new Response(
+        sseEvent("error", {
+          message: `systemPrompt or content required AND GitHub fetch failed: ${err instanceof Error ? err.message : String(err)}. Supply systemPrompt or content manually.`,
+        }),
+        { status: 400, headers: { "Content-Type": "text/event-stream" } }
+      );
+    }
+  }
+
   if (!prompt) {
     return new Response(
       sseEvent("error", { message: "systemPrompt or content is required (non-empty string)" }),

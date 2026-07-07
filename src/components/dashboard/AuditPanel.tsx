@@ -484,29 +484,28 @@ export function AuditRunner({
                       });
                     }
                     return (
-                      <div className="sim-transcript">
+                      <>
                         <div className="sim-transcript-header">
                           <span className="sim-transcript-cat">{selectedCategory}</span>
                           <span className="sim-transcript-label">{meta?.label ?? ""}</span>
                         </div>
                         {pairs.map((pair, idx) => (
-                          // Each conversational round renders as a
-                          // mini-VulnDetailCard: vertical sections with
-                          // uppercase labels + divider line + monospace
-                          // body block. Same idiom as
-                          // VulnDetailCard.tsx so the live transcript
-                          // feels like one document, not two chat
-                          // windows.
-                          <div key={idx} className="sim-turn-card">
+                          // Single-container document: each turn is a
+                          // logical block *inside* the transcript panel,
+                          // not a nested card of its own. Layout follows
+                          // VulnDetailCard.tsx — vertical sections with
+                          // uppercase label + monospace body block, no
+                          // child boxes with their own bg/border/padding.
+                          <div key={idx} className="sim-turn-block">
                             {pair.vulnTitle && (
-                              <div className="sim-turn-header">
+                              <div className="sim-turn-divider">
                                 <span className="sim-turn-num">Turn {pair.turnNumber}</span>
                                 <span className="sim-turn-target-title">{pair.vulnTitle}</span>
                               </div>
                             )}
                             {pair.attackerText && (
-                              <section className="sim-section sim-section--attacker">
-                                <div className="sim-section-label">🎯 Attacker Prompt</div>
+                              <section className="sim-section">
+                                <div className="sim-section-label sim-section-label--attacker">🎯 Attacker Prompt</div>
                                 <div className="sim-section-body">{pair.attackerText}</div>
                               </section>
                             )}
@@ -516,7 +515,7 @@ export function AuditRunner({
                                   pair.compromised ? " sim-section--compromised" : ""
                                 }`}
                               >
-                                <div className="sim-section-label">
+                                <div className="sim-section-label sim-section-label--agent">
                                   🤖 Agent Response
                                   {pair.compromised && (
                                     <span className="sim-section-warning">⚠ Compromised</span>
@@ -540,7 +539,7 @@ export function AuditRunner({
                             )}
                           </div>
                         )}
-                      </div>
+                      </>
                     );
                   })()}
                 </div>

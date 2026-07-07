@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { AuditReport, Vulnerability } from "@/lib/audit/types";
+import { AuditReport, Vulnerability, SEVERITY_RANK } from "@/lib/audit/types";
 import { ScoreRing, SeverityBadge } from "@/components/dashboard/AuditComponents";
 
 type ActiveTab = "vulnerabilities" | "simulation" | "guardrails";
@@ -132,7 +132,9 @@ export default function AuditResultDetail({
             </div>
           ) : (
             <div className="ard-vuln-list">
-              {vulnerabilities.map((vuln, i) => {
+              {[...vulnerabilities]
+                .sort((a, b) => SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity])
+                .map((vuln, i) => {
                 const isSelected = selectedVulnId === vuln.id;
                 return (
                   <div
@@ -194,7 +196,7 @@ export default function AuditResultDetail({
                 const prevCategory = i > 0 ? simulationTurns[i - 1].session_category : null;
                 const isNewSession = turn.session_category && turn.session_category !== prevCategory;
                 return (
-                  <div key={turn.id}>
+                  <div key={turn.id} className={`ar-chat-row ar-chat-row--${turn.sender}`}>
                     {isNewSession && (
                       <div className="ar-session-header">
                         <span className="ar-session-badge">

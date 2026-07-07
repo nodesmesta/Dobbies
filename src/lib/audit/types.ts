@@ -15,6 +15,20 @@ export interface Vulnerability {
   id: string;
   title: string;
   severity: Severity;
+  /** Original severity from static analysis (LLM rating).
+   *  Use this for "static: <sev>" UI chips when a downgrade happened
+   *  because the simulation could not demonstrate an exploit. */
+  severity_original?: Severity;
+  /** Combined severity after the post-simulation verdict. Prefer this in
+   *  the UI for the headline severity colour; `severity` falls back to
+   *  the raw static rating when the verdict row is missing (audit run
+   *  before this column was added). */
+  severity_effective?: Severity;
+  /** True iff at least one simulation turn targeted this vuln and the
+   *  agent was compromised on that turn. False iff targeted but the
+   *  agent refused. Undefined/null iff the vuln was not targeted at all
+   *  (fewer vulns than `numTurns`). */
+  exploitation_demonstrated?: boolean | null;
   /** OWASP code: LLM01–LLM10 */
   category_id: string;
   /** Human-readable category name (from join with vulnerability_categories) */

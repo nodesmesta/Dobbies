@@ -15,6 +15,12 @@
 import { chatCompletion } from "@/lib/llm/client";
 import type { Severity } from "@/lib/audit/types";
 import securityRules from "@/lib/security-rules.json";
+import {
+  parseJsonLenient,
+  unwrapFindingsArray,
+  applyFieldAliases,
+  coerceSeverity,
+} from "@/lib/llm/parse-lenient";
 
 // ── Types ────────────────────────────────────────────────────
 
@@ -231,17 +237,13 @@ Analyze the above system prompt and tool definitions for OWASP LLM Top 10 securi
 }
 
 function coerceFindingsArray(parsed: unknown): RawFinding[] {
-  if (Array.isArray(parsed)) return parsed as RawFinding[];
-  if (typeof parsed !== "object" || parsed === null) {
+  // Tolerates bare array, wrapped object ({findings|vulnerabilities|issues|results|data|...}:[...]}),
+  // and prose-padded JSON. Unwrapping logic is centralized in parse-lenient.
+  const found = unwrapFindingsArray(parsed);
+  if (!found) {
     throw new Error("Static-analyzer LLM JSON is not an object/array");
   }
-  const obj = parsed as Record<string, unknown>;
-  if (Array.isArray(obj.findings)) return obj.findings as RawFinding[];
-  if (Array.isArray(obj.vulnerabilities)) return obj.vulnerabilities as RawFinding[];
-  if (Array.isArray(obj.results)) return obj.results as RawFinding[];
-  throw new Error(
-    "Static-analyzer LLM JSON has no `findings`, `vulnerabilities`, or `results` array",
-  );
+  return found as RawFinding[];
 }
 
 function requireString(v: unknown, field: string, index: number): string {
@@ -262,11 +264,13 @@ function coerceFinding(raw: unknown, index: number): StaticFinding {
   if (typeof raw !== "object" || raw === null) {
     throw new Error(`Static-analysis finding #${index} is not an object`);
   }
-  const r = raw as RawFinding;
+  // Apply field alias map: LLMs emit {id,name,risk,...} or {category,severity_lowcase,...}
+  // The map copies the first non-empty value from each alias list into the canonical key.
+  const r = applyFieldAliases(raw as Record<string, unknown>);
   return {
     category_id: requireString(r.category_id, "category_id", index),
     title: requireString(r.title, "title", index),
-    severity: requireSeverity(r.severity, index),
+    severity: coerceSeverity(r.severity),
     description: requireString(r.description, "description", index),
     root_cause: requireString(r.root_cause, "root_cause", index),
     impact: requireString(r.impact, "impact", index),
@@ -300,10 +304,10 @@ async function analyzePromptWithLLM(
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(response);
+    parsed = parseJsonLenient(response);
   } catch (err) {
     throw new Error(
-      `Static-analyzer LLM returned malformed JSON: ${err instanceof Error ? err.message : String(err)} | raw=${response.slice(0, 200)}`,
+      `Static-analyzer LLM returned unrecoverable JSON: ${err instanceof Error ? err.message : String(err)}`,
     );
   }
 

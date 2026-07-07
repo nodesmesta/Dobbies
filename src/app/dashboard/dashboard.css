@@ -528,9 +528,13 @@
 
 /* ── Audit Runner ── */
 .audit-runner {
+  /* Full-dashboard width — the live audit owns the entire
+     dashboard panel (same as `.ard-wrapper` for the result-
+     detail page). The split grid below carves out the
+     dedicated right column for the live transcript card. */
   display: flex; flex-direction: column; gap: 1.5rem;
-  max-width: 760px; width: 100%;
-  padding: 1.5rem;
+  width: 100%;
+  padding: 0;
 }
 .ar-form-section {
   background: var(--color-surface-3);
@@ -609,7 +613,6 @@
   background: var(--color-surface-3);
   border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-lg);
-  overflow: hidden;
 }
 .ar-progress-header {
   display: flex; align-items: center; justify-content: space-between;
@@ -2537,11 +2540,14 @@
 }
 
 .sim-split-layout {
+  /* Left list gains a slightly wider column so a category
+     label can show across one line; the right column gets
+     the remaining width as a fully dedicated surface for
+     the live transcript card. */
   display: grid;
-  grid-template-columns: 280px 1fr;
-  gap: 1rem;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 1.25rem;
   margin-top: 0.5rem;
-  min-height: 320px;
 }
 
 .sim-category-list {
@@ -2644,11 +2650,16 @@
 
 .sim-transcript-panel {
   /* Layout-only wrapper — no visual surface, exactly like
-     .ard-vuln-detail-panel in the audit-detail page. The actual
-     dedicated card lives inside as `.sim-live-card`, mirroring
-     how `<VulnDetailCard>` sits inside `.ard-vuln-detail-panel`. */
-  max-height: 480px;
-  overflow-y: auto;
+     .ard-vuln-detail-panel in the audit-detail page. The
+     actual dedicated card lives inside as `.sim-live-card`,
+     mirroring how `<VulnDetailCard>` sits inside
+     `.ard-vuln-detail-panel`. No max-height: the transcript
+     card grows naturally with content (dashboard page scrolls
+     if needed), so the right column is *fully dedicated* to
+     the live chat — not a fixed-height clipped panel. */
+  position: sticky;
+  top: 1rem;
+  align-self: start;
 }
 .sim-transcript-panel::-webkit-scrollbar { width: 6px; }
 .sim-transcript-panel::-webkit-scrollbar-thumb {

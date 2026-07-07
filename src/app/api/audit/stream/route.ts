@@ -276,24 +276,107 @@ async function saveGuardrails(
 }
 
 /**
- * Fetch raw file content from GitHub via the raw.githubusercontent.com endpoint.
- * Tries the default branch `main` first, then `master`. Throws on parse failure
- * or HTTP non-OK on both branches, so the caller can surface an informative
- * error message to the UI.
+ * Audit-grade provenance chain for GitHub-sourced content.
+ *
+ * Each field below answers a specific forensic question about the file the
+ * audit was actually run against:
+ *
+ *   - content:     the bytes the LLM analyzer saw (deterministic per commit)
+ *   - sha256:      cryptographic fingerprint of content (catches tampering)
+ *   - bytes:       raw byte count (UTF-8 encoding; use new Blob([...]).size
+ *                  on the wire-equivalent if you ever switch to non-text)
+ *   - etag:        GitHub's response ETag — same on every GET until content
+ *                  or branch moves; structurally equivalent to Blob SHA
+ *   - sourceUrl:   the canonical URL the content was fetched from
+ *   - commitSha:   the exact git commit of the file (NOT branch ref) so
+ *                  audits can be replayed forever even if HEAD moves
+ */
+interface FetchedContent {
+  content: string;
+  sha256: string;
+  bytes: number;
+  etag: string | null;
+  sourceUrl: string;
+  commitSha: string | null;
+}
+
+/**
+ * SHA-256 of a UTF-8 string using Web Crypto API (available in both
+ * Node.js 18+ runtime and Vercel Edge runtime).
+ */
+async function sha256Hex(text: string): Promise<string> {
+  const bytes = new TextEncoder().encode(text);
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+/**
+ * Resolve owner/repo from a github.com URL. Accepts:
+ *   - https://github.com/<owner>/<repo>
+ *   - https://github.com/<owner>/<repo>.git
+ *   - git@github.com:<owner>/<repo> (rare, via SSH)
+ *   - https://github.com/<owner>/<repo>/tree/<branch>/<path>
+ */
+function parseGithubRepoUrl(repoUrl: string): { owner: string; repo: string } | null {
+  const httpsMatch = repoUrl.match(/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/.*)?$/);
+  if (httpsMatch) return { owner: httpsMatch[1], repo: httpsMatch[2] };
+  const sshMatch = repoUrl.match(/git@github\.com:([^/]+)\/([^/]+?)(?:\.git)?$/);
+  if (sshMatch) return { owner: sshMatch[1], repo: sshMatch[2] };
+  return null;
+}
+
+/**
+ * Look up the latest commit that touched a specific file path. Uses the
+ * public commits API without auth (rate-limited to 60 req/h per IP, plenty
+ * for the audit use case). Returns null on any error so we degrade
+ * gracefully — the raw content is still fetched and audited.
+ */
+async function lookupLatestCommitSha(
+  owner: string,
+  repo: string,
+  filePath: string,
+): Promise<string | null> {
+  try {
+    const apiUrl = `https://api.github.com/repos/${owner}/${repo}/commits?path=${encodeURIComponent(filePath)}&per_page=1`;
+    const r = await fetch(apiUrl, {
+      headers: {
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+      },
+    });
+    if (!r.ok) return null;
+    const data = await r.json();
+    if (Array.isArray(data) && data.length > 0 && typeof data[0].sha === "string") {
+      return data[0].sha;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Fetch raw file content from GitHub via the raw.githubusercontent.com endpoint
+ * together with the full provenance chain (sha256, etag, sourceUrl, commitSha).
+ * Tries the default branch `main` first, then `master`. Throws on parse
+ * failure or HTTP non-OK on both branches, so the caller can surface an
+ * informative error message to the UI.
  *
  * This handles a real UI gap: RepoScanner.tsx constructs DetectedAgent with
  * `content: ""` when audit is triggered from scanned-repo history (where the
  * local `ScannedFile.content` was discarded via `ScannedFileWithStatus`).
  * Server-side fetch makes the audit pipeline robust to that gap without a
- * silent fallback — fetch either resolves with text OR throws with a reason.
+ * silent fallback — fetch either resolves with text + provenance chain, OR
+ * throws with a reason.
  */
-async function fetchRepoFileContent(repoUrl: string, filePath: string): Promise<string> {
-  const m = repoUrl.match(/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/.*)?$/);
-  if (!m) {
+async function fetchRepoFileContent(repoUrl: string, filePath: string): Promise<FetchedContent> {
+  const parsed = parseGithubRepoUrl(repoUrl);
+  if (!parsed) {
     throw new Error(`Cannot parse GitHub repoUrl: "${repoUrl}". Expected format: https://github.com/<owner>/<repo>`);
   }
-  const [, owner, repo] = m;
-  // Strip a leading "/" from filePath so we don't get "//" in the URL.
+  const { owner, repo } = parsed;
   const cleanPath = filePath.replace(/^\/+/, "");
   const tried: string[] = [];
   for (const branch of ["main", "master"]) {
@@ -303,7 +386,16 @@ async function fetchRepoFileContent(repoUrl: string, filePath: string): Promise<
       const r = await fetch(rawUrl, { headers: { "Accept": "application/vnd.github.raw" } });
       if (r.ok) {
         const text = await r.text();
-        if (text.length > 0) return text;
+        if (text.length > 0) {
+          return {
+            content: text,
+            sha256: await sha256Hex(text),
+            bytes: new TextEncoder().encode(text).length,
+            etag: r.headers.get("etag"),
+            sourceUrl: rawUrl,
+            commitSha: await lookupLatestCommitSha(owner, repo, cleanPath),
+          };
+        }
       }
     } catch {
       // Network error — try next branch before failing.
@@ -344,15 +436,40 @@ export async function POST(request: NextRequest) {
   //   3. GitHub raw fetch using repoUrl+filePath — covers UI flows where the
   //      local scanner state lost the file content (e.g. audit from repo history)
   //      The fetch is explicit, not silent: it logs the URL and resolves OR throws.
+  //
+  // `provenance` holds the audit-grade chain captured at fetch time. For path
+  // 3 it is populated from GitHub (sha256, etag, sourceUrl, commitSha). For
+  // path 1 & 2 (client-supplied) it remains null — we cannot prove the bytes
+  // we audited match repo bytes without re-fetching, which is intentional:
+  // better to leave the chain empty than to fake it.
   let prompt: string | undefined =
     typeof systemPrompt === "string" && systemPrompt.length > 0 ? systemPrompt :
     typeof content === "string" && content.length > 0 ? content :
     undefined;
 
+  type Provenance = {
+    contentSha256: string;
+    contentBytes: number;
+    gitEtag: string | null;
+    sourceUrl: string;
+    commitSha: string | null;
+    fetchedFromGithub: true;
+  };
+  let provenance: Provenance | null = null;
+
   if (!prompt && typeof repoUrl === "string" && typeof filePath === "string" && repoUrl.length > 0 && filePath.length > 0) {
     try {
-      prompt = await fetchRepoFileContent(repoUrl, filePath);
-      console.log(`[audit-stream:${agentName}] fetched file content from GitHub raw: ${filePath} (${prompt.length} chars)`);
+      const fetched = await fetchRepoFileContent(repoUrl, filePath);
+      prompt = fetched.content;
+      provenance = {
+        contentSha256: fetched.sha256,
+        contentBytes: fetched.bytes,
+        gitEtag: fetched.etag,
+        sourceUrl: fetched.sourceUrl,
+        commitSha: fetched.commitSha,
+        fetchedFromGithub: true,
+      };
+      console.log(`[audit-stream:${agentName}] fetched file content from GitHub raw: ${filePath} sha256=${fetched.sha256.slice(0, 12)}… commit=${fetched.commitSha ?? "(unresolved)"} etag=${fetched.etag ?? "(none)"}`);
     } catch (err) {
       return new Response(
         sseEvent("error", {
@@ -595,6 +712,15 @@ export async function POST(request: NextRequest) {
             dynamic_score: dynamicScore,
             overall_score: overallScore,
             status: "completed",
+            // Provenance chain — only populated when the prompt was GitHub-fetched.
+            // For client-supplied systemPrompt/content (no GitHub fetch), these
+            // remain NULL so the provenance chain honestly reflects what we proved.
+            content_sha256:      provenance?.contentSha256      ?? null,
+            commit_sha:          provenance?.commitSha          ?? null,
+            git_etag:            provenance?.gitEtag            ?? null,
+            content_bytes:       provenance?.contentBytes       ?? null,
+            source_url:          provenance?.sourceUrl          ?? null,
+            fetched_from_github: provenance?.fetchedFromGithub  ?? false,
           });
 
           const { idMap, counts } = await saveVulnerabilities(supabase, reportId, allVulnerabilities);

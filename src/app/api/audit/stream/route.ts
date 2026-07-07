@@ -390,10 +390,31 @@ export async function POST(request: NextRequest) {
 
             // Simulate agent response using Agent LLM
             const t_agent = Date.now();
-            const agentText = await generateAgentResponse(prompt, toolList, fullTranscript);
-            trace(`turn ${turnNum + 1} generateAgentResponse LLM took ${Date.now() - t_agent}ms`);
+            let agentText: string | null = null;
+            try {
+              agentText = await generateAgentResponse(prompt, toolList, fullTranscript);
+              trace(`turn ${turnNum + 1} generateAgentResponse LLM took ${Date.now() - t_agent}ms`);
+            } catch (err) {
+              trace(`turn ${turnNum + 1} generateAgentResponse FAILED: ${err instanceof Error ? err.message : String(err)}`);
+            }
             if (!agentText) {
-              throw new Error("Agent LLM failed to generate response — aborting simulation");
+              // LLM unavailable for this turn — record as inconclusive and continue.
+              // Frontend gets a final_result when loop completes; this turn won't falsely
+              // count as compromise so the evaluator can still produce a meaningful score.
+              fullTranscript.push({
+                sender: "agent",
+                text: "[Agent LLM unavailable for this turn — agent simulator returned no content]",
+                compromised: undefined,
+              });
+              await delay(400);
+              controller.enqueue(encoder.encode(
+                sseEvent("chat_turn", {
+                  sender: "agent",
+                  text: "[Agent LLM unavailable — see server logs]",
+                  compromised: false,
+                })
+              ));
+              continue;
             }
             // Compromise flag will be determined by evaluator LLM at Phase 3
             const isCompromised = false;

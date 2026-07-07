@@ -49,7 +49,7 @@ ${toolDescriptions || "No tools available."}
   const response = await chatCompletion(messages, {
     model: "accounts/fireworks/models/minimax-m3",
     temperature: 0.7,
-    maxTokens: 300,
+    maxTokens: 600,
   });
 
   return response;

@@ -130,6 +130,11 @@ export function AuditRunner({
                 localStaticScore = d.score;
                 setStaticResult({ score: d.score, message: d.message });
                 addStatus(`✓ ${d.message}`, true);
+              } else if (currentEvent === "error") {
+                const d = data as { message: string };
+                setPhase("done");
+                setIsRunning(false);
+                addStatus(`Error: ${d.message}`);
               } else if (currentEvent === "chat_turn") {
                 const d = data as { sender: "attacker" | "agent"; text: string; compromised?: boolean; targetVulnId?: string; targetVulnTitle?: string };
                 setChatTurns((prev) => [

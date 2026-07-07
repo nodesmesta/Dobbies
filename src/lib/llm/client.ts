@@ -66,6 +66,16 @@ export async function chatCompletion(
   }
 
   const json = await res.json();
-  const content = json?.choices?.[0]?.message?.content;
+  const choice = json?.choices?.[0];
+  const content = choice?.message?.content;
+  if (content === null || typeof content === "undefined") {
+    console.warn("[llm-client] Fireworks returned empty content:", {
+      model,
+      finish_reason: choice?.finish_reason,
+      usage: json?.usage,
+      sample: JSON.stringify(json).slice(0, 400),
+    });
+    return null;
+  }
   return typeof content === "string" ? content.trim() : null;
 }

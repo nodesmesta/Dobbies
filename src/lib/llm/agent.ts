@@ -1,4 +1,4 @@
-import { chatCompletion, type ChatMessage } from "./client";
+import { chatCompletionWithRetry, type ChatMessage } from "./client";
 import type { DetectedAgentTool } from "@/lib/github/types";
 
 /**
@@ -60,9 +60,14 @@ ${toolDescriptions}
     }
   }
 
-  return chatCompletion(messages, {
+  // Use chatCompletionWithRetry (NOT raw chatCompletion) because the
+  // agent's output here is unstructured visible text — visible content
+  // adapts well to "give me more tokens" retries when the reasoning-style
+  // model burns the budget on internal chain-of-thought. See client.ts
+  // for the policy: 1.5x budget per retry + 0.1 temp drift, max 2 retries.
+  return chatCompletionWithRetry(messages, {
     model,
     temperature: 0.7,
     maxTokens: 1500,
-  });
+  }, "agent");
 }

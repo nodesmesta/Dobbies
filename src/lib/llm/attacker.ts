@@ -8,7 +8,7 @@
  * Fail-loud contract: throws on empty inputs or LLM failures.
  */
 
-import { chatCompletion, type ChatMessage } from "./client";
+import { chatCompletionWithRetry, type ChatMessage } from "./client";
 import type { DetectedAgentTool } from "@/lib/github/types";
 import type { Vulnerability } from "@/lib/audit/types";
 
@@ -110,9 +110,9 @@ ${toolDescriptions}
   // tokens — combined with reasoning budget, 800 was not enough on long
   // transcripts (turn 5+). 1500 matches `agent.ts` and gives enough
   // headroom for the multi-turn growing context.
-  return chatCompletion(messages, {
+  return chatCompletionWithRetry(messages, {
     model,
     temperature: 0.9,
     maxTokens: 1500,
-  });
+  }, "attacker");
 }

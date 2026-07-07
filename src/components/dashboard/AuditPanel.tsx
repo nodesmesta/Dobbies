@@ -490,33 +490,40 @@ export function AuditRunner({
                           <span className="sim-transcript-label">{meta?.label ?? ""}</span>
                         </div>
                         {pairs.map((pair, idx) => (
-                          <div key={idx} className="sim-turn-pair">
+                          // Each conversational round renders as a
+                          // mini-VulnDetailCard: vertical sections with
+                          // uppercase labels + divider line + monospace
+                          // body block. Same idiom as
+                          // VulnDetailCard.tsx so the live transcript
+                          // feels like one document, not two chat
+                          // windows.
+                          <div key={idx} className="sim-turn-card">
                             {pair.vulnTitle && (
-                              <div className="sim-turn-target">
+                              <div className="sim-turn-header">
                                 <span className="sim-turn-num">Turn {pair.turnNumber}</span>
                                 <span className="sim-turn-target-title">{pair.vulnTitle}</span>
                               </div>
                             )}
                             {pair.attackerText && (
-                              <div className="sim-bubble sim-bubble--attacker">
-                                <div className="sim-bubble-sender">🎯 Attacker</div>
-                                <p className="sim-bubble-text">{pair.attackerText}</p>
-                              </div>
+                              <section className="sim-section sim-section--attacker">
+                                <div className="sim-section-label">🎯 Attacker Prompt</div>
+                                <div className="sim-section-body">{pair.attackerText}</div>
+                              </section>
                             )}
                             {pair.agentText && (
-                              <div
-                                className={`sim-bubble sim-bubble--agent${
-                                  pair.compromised ? " sim-bubble--compromised" : ""
+                              <section
+                                className={`sim-section sim-section--agent${
+                                  pair.compromised ? " sim-section--compromised" : ""
                                 }`}
                               >
-                                <div className="sim-bubble-sender">
-                                  🤖 Agent
+                                <div className="sim-section-label">
+                                  🤖 Agent Response
                                   {pair.compromised && (
-                                    <span className="sim-bubble-warning">⚠ COMPROMISED</span>
+                                    <span className="sim-section-warning">⚠ Compromised</span>
                                   )}
                                 </div>
-                                <p className="sim-bubble-text">{pair.agentText}</p>
-                              </div>
+                                <div className="sim-section-body">{pair.agentText}</div>
+                              </section>
                             )}
                           </div>
                         ))}

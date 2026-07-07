@@ -2689,28 +2689,39 @@
   letter-spacing: 0.04em;
 }
 
-.sim-turn-pair {
+/* Each conversational round (attacker → agent) renders as a
+   mini-VulnDetailCard: vertical stack of sections with uppercase
+   labels, divider lines, and monospace body blocks. Same idiom as
+   VulnDetailCard.tsx so the live transcript reads like one document
+   rather than a chat window. */
+.sim-turn-card {
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-md);
+  padding: 1.25rem;
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 1.25rem;
 }
-.sim-turn-target {
+.sim-turn-header {
   display: flex;
   align-items: center;
   gap: 0.5rem;
   font-size: 0.75rem;
   color: var(--color-text-muted);
-  padding: 0.25rem 0;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--color-border-subtle);
   font-family: var(--font-mono);
 }
 .sim-turn-num {
-  background: rgba(255, 255, 255, 0.05);
+  background: var(--color-surface-3);
   border: 1px solid var(--color-border-subtle);
   border-radius: 4px;
   padding: 0.05rem 0.4rem;
   font-weight: 700;
   font-size: 0.65rem;
   letter-spacing: 0.04em;
+  color: var(--color-text-secondary);
 }
 .sim-turn-target-title {
   color: var(--color-text-secondary);
@@ -2720,50 +2731,54 @@
   white-space: nowrap;
 }
 
-.sim-bubble {
-  border-radius: var(--radius-md);
-  padding: 0.625rem 0.875rem;
+/* Per-section block — matches VulnDetailCard's h3 + body pattern,
+   adopted for live transcript content. */
+.sim-section {
   display: flex;
   flex-direction: column;
-  gap: 0.25rem;
-  max-width: 92%;
-  width: fit-content;
-  font-size: 0.8375rem;
-  line-height: 1.55;
+  gap: 0.5rem;
 }
-.sim-bubble--attacker {
-  background: rgba(248, 113, 113, 0.08);
-  border: 1px solid rgba(248, 113, 113, 0.22);
-  align-self: flex-start;
-}
-.sim-bubble--agent {
-  background: rgba(52, 211, 153, 0.08);
-  border: 1px solid rgba(52, 211, 153, 0.22);
-  align-self: flex-end;
-}
-.sim-bubble--compromised {
-  border-color: rgba(248, 113, 113, 0.5) !important;
-  background: rgba(248, 113, 113, 0.14) !important;
-}
-.sim-bubble-sender {
+.sim-section-label {
   font-size: 0.7rem;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: var(--color-text-muted);
+  color: var(--color-text-secondary);
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
 }
-.sim-bubble-warning {
-  margin-left: 0.5rem;
-  color: #f87171;
-  font-weight: 800;
-  font-size: 0.65rem;
-}
-.sim-bubble-text {
-  margin: 0;
-  color: var(--color-text-primary);
-  word-break: break-word;
-  white-space: pre-wrap;
+.sim-section-body {
   font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  color: var(--color-text-primary);
+  background: var(--color-surface-3);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 0.75rem 0.875rem;
+  white-space: pre-wrap;
+  word-break: break-word;
+  margin: 0;
+}
+.sim-section--attacker .sim-section-label {
+  color: var(--color-accent-red);
+}
+.sim-section--agent .sim-section-label {
+  color: var(--color-accent-green);
+}
+.sim-section--compromised .sim-section-label {
+  color: var(--color-accent-red);
+}
+.sim-section--compromised .sim-section-body {
+  border-color: var(--color-accent-red);
+  background: rgba(248, 113, 113, 0.06);
+}
+.sim-section-warning {
+  margin-left: auto;
+  color: var(--color-accent-red);
+  font-weight: 800;
+  letter-spacing: 0.04em;
 }
 
 .sim-eval-footer {

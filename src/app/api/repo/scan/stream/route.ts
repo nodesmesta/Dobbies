@@ -12,12 +12,20 @@
  *
  *   event: done
  *   data: {"files":[...],"repoUrl":"..."}
+ *
+ * Ownership: Same strict mode as /api/repo/scan — login user must be the
+ *            owner OR have admin/maintainer/collaborator push access on the
+ *            target repo. Check happens BEFORE the stream opens; failure is
+ *            returned as a JSON error response (status 403) rather than as
+ *            an SSE event, because SSE requires the response to already be
+ *            streaming-friendly by the time ownership is verified.
  */
 import { NextRequest } from "next/server";
 import { scanFiles } from "@/lib/github/detect-agents";
 import type { RepoFileEntry } from "@/lib/github/detect-agents";
 import { parseScanScope } from "@/lib/github/readme-scope";
 import { createClient } from "@/utils/supabase/server";
+import { verifyRepoAccess } from "@/lib/github/ownership";
 
 // ─── GitHub API helpers ───────────────────────────────────────────
 
@@ -77,16 +85,51 @@ export async function POST(request: NextRequest) {
 
   const { owner, repo } = parsed;
 
-  // ── Auth ──
+  // ── Auth + Ownership ────────────────────────────────────
   let token: string | undefined;
+  let loginUsername: string | null = null;
   try {
     const supabase = await createClient();
     const { data: { session } } = await supabase.auth.getSession();
     if (session?.provider_token) {
       token = session.provider_token;
     }
+    loginUsername =
+      (session?.user?.user_metadata as any)?.user_name ??
+      (session?.user?.user_metadata as any)?.preferred_username ??
+      (session?.user?.user_metadata as any)?.user_login ??
+      null;
   } catch {
     // Fall back to unauthenticated
+  }
+
+  // ── Ownership enforcement (sync, before stream opens) ──
+  if (!token || !loginUsername) {
+    return Response.json(
+      {
+        error:
+          "Ownership verification requires GitHub OAuth sign-in. " +
+          "Re-link your GitHub account in Settings, then retry. " +
+          "(token=" + (token ? "present" : "missing") +
+          ", githubLogin=" + (loginUsername ?? "missing") + ")",
+      },
+      { status: 403 }
+    );
+  }
+
+  const ownership = await verifyRepoAccess(token, owner, repo, loginUsername);
+  if (!ownership.allowed) {
+    return Response.json(
+      {
+        error:
+          `Access denied: ${ownership.reason} ` +
+          `You must be the owner, admin, maintainer, or push collaborator of ` +
+          `${owner}/${repo} to scan it via this app.`,
+        accessLevel: ownership.accessLevel,
+        repoOwnerLogin: ownership.repoOwnerLogin,
+      },
+      { status: 403 }
+    );
   }
 
   // ── Create streaming response ──

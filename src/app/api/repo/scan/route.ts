@@ -10,12 +10,18 @@
  *
  * Auth: Requires Supabase session with GitHub provider_token.
  *       Falls back to unauthenticated GitHub API if no token.
+ *
+ * Ownership: Requires login user to be owner OR have push access (admin /
+ *            maintainer / collaborator) on the target repo. Read-only viewers
+ *            are rejected — we audit code the user is responsible for, not
+ *            arbitrary public repos. See src/lib/github/ownership.ts.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { scanFiles } from "@/lib/github/detect-agents";
 import type { RepoFileEntry } from "@/lib/github/detect-agents";
 import { parseScanScope } from "@/lib/github/readme-scope";
 import { createClient } from "@/utils/supabase/server";
+import { verifyRepoAccess } from "@/lib/github/ownership";
 
 // ─── GitHub API helpers ───────────────────────────────────────────
 
@@ -70,16 +76,58 @@ export async function POST(request: NextRequest) {
 
     const { owner, repo } = parsed;
 
-    // ── Auth: try to get Supabase session with provider_token ──
+    // ── Auth + Ownership ────────────────────────────────────
     let token: string | undefined;
+    let loginUsername: string | null = null;
     try {
       const supabase = await createClient();
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.provider_token) {
         token = session.provider_token;
       }
+      // GitHub OAuth populates user_metadata.user_name with the GitHub login.
+      // Fall back to provider_token info if present.
+      loginUsername =
+        (session?.user?.user_metadata as any)?.user_name ??
+        (session?.user?.user_metadata as any)?.preferred_username ??
+        (session?.user?.user_metadata as any)?.user_login ??
+        null;
     } catch {
       // No Supabase configured — fall back to unauthenticated
+    }
+
+    // ── Ownership enforcement ─────────────────────────────
+    // Without an OAuth token, we cannot verify ownership against GitHub.
+    // Without it, an attacker could submit any repoUrl while logged in as
+    // user X and we would still scan whatever GitHub shows up at that URL.
+    // The strict mode (user-selected) requires the GitHub identity to match
+    // the repo owner OR admin/maintainer/collaborator role.
+    if (!token || !loginUsername) {
+      return NextResponse.json(
+        {
+          error:
+            "Ownership verification requires GitHub OAuth sign-in. " +
+            "Re-link your GitHub account in Settings, then retry. " +
+            "(token=" + (token ? "present" : "missing") +
+            ", githubLogin=" + (loginUsername ?? "missing") + ")",
+        },
+        { status: 403 }
+      );
+    }
+
+    const ownership = await verifyRepoAccess(token, owner, repo, loginUsername);
+    if (!ownership.allowed) {
+      return NextResponse.json(
+        {
+          error:
+            `Access denied: ${ownership.reason} ` +
+            `You must be the owner, admin, maintainer, or push collaborator of ` +
+            `${owner}/${repo} to scan it via this app.`,
+          accessLevel: ownership.accessLevel,
+          repoOwnerLogin: ownership.repoOwnerLogin,
+        },
+        { status: 403 }
+      );
     }
 
     const scanLog: string[] = [];

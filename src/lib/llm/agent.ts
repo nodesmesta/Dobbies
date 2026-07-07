@@ -63,6 +63,6 @@ ${toolDescriptions}
   return chatCompletion(messages, {
     model,
     temperature: 0.7,
-    maxTokens: 600,
+    maxTokens: 1500,
   });
 }

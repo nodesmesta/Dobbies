@@ -927,9 +927,16 @@
   border-radius: var(--radius-lg);
   padding: 1.25rem;
   display: flex; flex-direction: column; gap: 0.625rem;
-  transition: border-color 0.15s ease;
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
-.ard-vuln-item:hover { border-color: var(--color-border-accent); }
+.ard-vuln-item:hover {
+  border-color: var(--color-border-accent);
+  background: var(--color-surface-2);
+}
+.ard-vuln-item[data-selected="true"] {
+  border-color: var(--color-accent-green);
+}
 .ard-vuln-item-header {
   display: flex; align-items: center; justify-content: space-between;
   flex-wrap: wrap; gap: 0.5rem;

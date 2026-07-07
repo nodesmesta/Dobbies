@@ -284,7 +284,12 @@ export async function POST(request: NextRequest) {
     const encoder = new TextEncoder();
     const stream = new ReadableStream({
       async start(controller) {
+        const t0 = Date.now();
+        const reportId = `audit-${t0}`;
+        const trace = (msg: string) => console.log(`[audit-stream:${reportId}] ${Date.now() - t0}ms ${msg}`);
         try {
+          trace(`pipeline start for agent="${agentName}" tools=${toolNames.length}`);
+
           // ── PHASE 1: RAG Static Analysis ──────────────────────
           controller.enqueue(encoder.encode(
             sseEvent("status", { message: `Initializing audit pipeline for "${agentName}"...` })
@@ -307,9 +312,12 @@ export async function POST(request: NextRequest) {
           await delay(400);
 
           // Run LLM-based static analysis (async)
+          const t_phase1 = Date.now();
+          trace(`analyzeWithRAG start`);
           const ragResult = await analyzeWithRAG(prompt, toolsDescription, toolList);
           const staticScore = ragResult.score;
           const vulnerabilities = ragResult.vulnerabilities;
+          trace(`analyzeWithRAG done in ${Date.now() - t_phase1}ms → score=${staticScore} vulns=${vulnerabilities.length}`);
 
           controller.enqueue(encoder.encode(
             sseEvent("static_result", {
@@ -338,12 +346,17 @@ export async function POST(request: NextRequest) {
           // Each turn: LLM generates attacker prompt → LLM simulates agent response
           // Dynamic turns: 1 attack per vulnerability, min 2, max 10
           const numTurns = Math.max(2, Math.min(vulnerabilities.length, 10));
+          trace(`phase 2 start: red-team loop numTurns=${numTurns}`);
 
           for (let turnNum = 0; turnNum < numTurns; turnNum++) {
+            const t_turn = Date.now();
             // Generate attacker prompt via LLM — target 1 vulnerability per turn
             const targetVuln = turnNum < vulnerabilities.length
               ? vulnerabilities[turnNum]
               : vulnerabilities[vulnerabilities.length - 1]; // fallback: repeat last vuln
+            trace(`turn ${turnNum + 1}/${numTurns} start → target: ${targetVuln?.title?.slice(0,40) || "(none)"}`);
+
+            const t_attack = Date.now();
             const attackerMsg = await generateAttack(
               prompt,
               toolList,
@@ -351,6 +364,7 @@ export async function POST(request: NextRequest) {
               vulnerabilities,
               targetVuln,
             );
+            trace(`turn ${turnNum + 1} generateAttack LLM took ${Date.now() - t_attack}ms`);
 
             if (!attackerMsg) {
               throw new Error("Attacker LLM failed to generate attack — aborting simulation");
@@ -375,7 +389,9 @@ export async function POST(request: NextRequest) {
             });
 
             // Simulate agent response using Agent LLM
+            const t_agent = Date.now();
             const agentText = await generateAgentResponse(prompt, toolList, fullTranscript);
+            trace(`turn ${turnNum + 1} generateAgentResponse LLM took ${Date.now() - t_agent}ms`);
             if (!agentText) {
               throw new Error("Agent LLM failed to generate response — aborting simulation");
             }
@@ -396,6 +412,7 @@ export async function POST(request: NextRequest) {
               text: agentText,
               compromised: isCompromised,
             });
+            trace(`turn ${turnNum + 1} complete in ${Date.now() - t_turn}ms total`);
           }
 
           sandboxResult = {
@@ -413,12 +430,15 @@ export async function POST(request: NextRequest) {
           let evaluationRisks: string[] = [];
           let evaluationRecommendations: string[] = [];
 
+          trace(`phase 3 start: evaluator LLM`);
+          const t_eval = Date.now();
           // LLM-Powered Evaluator for nuanced scoring
           const evalResult = await evaluateTranscript(
             agentName,
             prompt,
             sandboxResult.turns,
           );
+          trace(`evaluator LLM completed in ${Date.now() - t_eval}ms`);
           if (!evalResult) {
             throw new Error("Evaluator LLM failed to analyze transcript — aborting scoring");
           }
@@ -460,8 +480,6 @@ export async function POST(request: NextRequest) {
             compromised: turn.compromised ?? false,
             target_vuln_id: turn.targetVulnId ?? null,
           }));
-
-          const reportId = `audit-${Date.now()}`;
 
           // ── Save to Supabase (normalized tables) ──────────────
           try {
@@ -529,8 +547,10 @@ export async function POST(request: NextRequest) {
           ));
 
           controller.close();
+          trace(`pipeline complete: total ${Date.now() - t0}ms | final_result emitted`);
         } catch (err) {
           const message = err instanceof Error ? err.message : "Pipeline error";
+          trace(`PIPELINE ERROR after ${Date.now() - t0}ms: ${message}`);
           controller.enqueue(encoder.encode(sseEvent("error", { message })));
           controller.close();
         }

@@ -204,25 +204,23 @@ async function analyzePromptWithLLM(
       { role: "system", content: ANALYSIS_SYSTEM_PROMPT },
       { role: "user", content: userPrompt },
     ],
-    { temperature: 0.1, maxTokens: 4096 }
+    { temperature: 0.1, maxTokens: 4096, responseFormat: "json_object" }
   );
 
   if (!response) return [];
 
   // Parse JSON from response
   try {
-    // Find JSON array in the response (handle markdown code fences)
-    const jsonMatch = response.match(/\[\s*\{[\s\S]*\}\s*\]/);
-    const jsonStr = jsonMatch ? jsonMatch[0] : response;
-    const findings = JSON.parse(jsonStr) as StaticFinding[];
+    const findings = JSON.parse(response) as StaticFinding[];
 
-    // Validate findings
     return Array.isArray(findings)
       ? findings.filter((f) => f.category_id && f.severity && f.title)
       : [];
-  } catch {
-    // If JSON parsing fails, return empty — don't crash the pipeline
-    console.warn("[static-analyzer] Failed to parse LLM response as JSON:", response.slice(0, 200));
+  } catch (err) {
+    console.warn("[static-analyzer] Failed to parse LLM response as JSON:", {
+      error: err instanceof Error ? err.message : String(err),
+      responsePreview: response.slice(0, 200),
+    });
     return [];
   }
 }

@@ -18,6 +18,7 @@ export interface ChatCompletionOptions {
   model?: string;
   temperature?: number;
   maxTokens?: number;
+  responseFormat?: "json_object";
 }
 
 /**
@@ -35,6 +36,7 @@ export async function chatCompletion(
     model = "accounts/fireworks/models/minimax-m3",
     temperature = 0.7,
     maxTokens = 1024,
+    responseFormat,
   } = options;
 
   const controller = new AbortController();
@@ -51,6 +53,7 @@ export async function chatCompletion(
       messages,
       temperature,
       max_tokens: maxTokens,
+      ...(responseFormat && { response_format: { type: responseFormat } }),
     }),
     signal: controller.signal,
   });

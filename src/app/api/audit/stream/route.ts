@@ -589,7 +589,6 @@ export async function POST(request: NextRequest) {
         const fullTranscript: SandboxTurn[] = [];
         const sessionScores: number[] = [];
         const sessionResults: { category: string; score: number; compromisedLocal: number[] }[] = [];
-        let allCompromisedCount = 0;
 
         for (const [categoryId, categoryVulns] of byCategory) {
           const label = CATEGORY_LABELS[categoryId] ?? categoryId;
@@ -688,8 +687,6 @@ export async function POST(request: NextRequest) {
           const agentCompromisedLocal = sessionEval.compromisedTurns.filter(
             n => sessionTranscript[n - 1]?.sender === "agent"
           ).length;
-          allCompromisedCount += agentCompromisedLocal;
-
           sessionScores.push(sessionEval.dynamicScore);
           sessionResults.push({
             category: categoryId,
@@ -803,9 +800,14 @@ export async function POST(request: NextRequest) {
           const targetedVulnIds = new Set<string>();
           for (const turn of simulationLogs) {
             if (turn.target_vuln_id) {
-              targetedVulnIds.add(turn.target_vuln_id);
-              if (turn.compromised === true) {
-                exploitedVulnIds.add(turn.target_vuln_id);
+              // simulationLogs stores JS IDs; map through idMap to get DB UUIDs
+              // so the set check at line ~823 (against vulnDbId) works correctly.
+              const dbId = idMap[turn.target_vuln_id];
+              if (dbId) {
+                targetedVulnIds.add(dbId);
+                if (turn.compromised === true) {
+                  exploitedVulnIds.add(dbId);
+                }
               }
             }
           }
@@ -829,7 +831,7 @@ export async function POST(request: NextRequest) {
             } else {
               // Either targeted-but-not-exploited, or not targeted at all.
               // Downgrade critical/high/medium to 'low' (potential only).
-              effective = vuln.severity === "low" ? "low" : "low";
+              effective = "low";
             }
 
             const { error: exploitationErr } = await supabase

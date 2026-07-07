@@ -717,6 +717,32 @@
   word-break: break-word;
 }
 
+/* ── Session Separator ── */
+.ar-session-header {
+  display: flex; align-items: center; gap: 0.5rem;
+  margin: 1rem 0 0.5rem;
+}
+.ar-session-header::before,
+.ar-session-header::after {
+  content: ""; flex: 1; height: 1px;
+  background: linear-gradient(90deg, transparent, rgba(99,102,241,0.4), transparent);
+}
+.ar-session-header::before {
+  background: linear-gradient(90deg, transparent, rgba(99,102,241,0.4));
+}
+.ar-session-header::after {
+  background: linear-gradient(90deg, rgba(99,102,241,0.4), transparent);
+}
+.ar-session-badge {
+  font-size: 0.65rem; font-weight: 700; letter-spacing: 0.05em;
+  color: #a5b4fc;
+  background: rgba(99,102,241,0.12);
+  border: 1px solid rgba(99,102,241,0.25);
+  padding: 0.2rem 0.7rem; border-radius: 999px;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
 /* ── Audit Result Detail ── */
 .ard-wrapper {
   display: flex; flex-direction: column; gap: 0;

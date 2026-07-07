@@ -190,12 +190,22 @@ export default function AuditResultDetail({
             </div>
           ) : (
             <div className="ard-sim-log">
-              {simulationTurns.map((turn, i) => (
-                <div
-                  key={turn.id}
-                  className={`ar-chat-bubble ar-chat-bubble--${turn.sender} animate-fade-in-up`}
-                  style={{ animationDelay: `${i * 0.04}s` }}
-                >
+              {simulationTurns.map((turn, i) => {
+                const prevCategory = i > 0 ? simulationTurns[i - 1].session_category : null;
+                const isNewSession = turn.session_category && turn.session_category !== prevCategory;
+                return (
+                  <div key={turn.id}>
+                    {isNewSession && (
+                      <div className="ar-session-header">
+                        <span className="ar-session-badge">
+                          Session: {turn.session_category?.toUpperCase() ?? "??"}
+                        </span>
+                      </div>
+                    )}
+                    <div
+                      className={`ar-chat-bubble ar-chat-bubble--${turn.sender} animate-fade-in-up`}
+                      style={{ animationDelay: `${i * 0.04}s` }}
+                    >
                   <div className="ar-chat-sender">
                     {turn.sender === "attacker" ? "🎯 Attacker" : "🤖 Agent"}
                     {turn.sender === "attacker" && turn.target_vuln_title && (
@@ -212,7 +222,9 @@ export default function AuditResultDetail({
                   </div>
                   <p className="ar-chat-text">{turn.text}</p>
                 </div>
-              ))}
+                </div>
+              );
+            })}
             </div>
           )}
         </div>

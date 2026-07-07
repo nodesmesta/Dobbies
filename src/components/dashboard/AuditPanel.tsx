@@ -146,7 +146,7 @@ export function AuditRunner({
                 setIsRunning(false);
                 addStatus(`Error: ${d.message}`);
               } else if (currentEvent === "chat_turn") {
-                const d = data as { sender: "attacker" | "agent"; text: string; compromised?: boolean; targetVulnId?: string; targetVulnTitle?: string };
+                const d = data as { sender: "attacker" | "agent"; text: string; compromised?: boolean; targetVulnId?: string; targetVulnTitle?: string; sessionCategory?: string };
                 setChatTurns((prev) => [
                   ...prev,
                   {
@@ -157,6 +157,7 @@ export function AuditRunner({
                     compromised: d.compromised ?? false,
                     target_vuln_id: d.targetVulnId ?? null,
                     target_vuln_title: d.targetVulnTitle ?? null,
+                    session_category: d.sessionCategory ?? null,
                     turn_number: prev.length + 1,
                   },
                 ]);
@@ -315,25 +316,38 @@ export function AuditRunner({
                 Live Red-Team Simulation
               </p>
               <div className="ar-chat-log">
-                {chatTurns.map((turn) => (
-                  <div
-                    key={turn.id}
-                    className={`ar-chat-bubble ar-chat-bubble--${turn.sender} animate-fade-in-up`}
-                  >
-                    <div className="ar-chat-sender">
-                      {turn.sender === "attacker" ? "🎯 Attacker" : "🤖 Agent"}
-                      {turn.sender === "attacker" && turn.target_vuln_title && (
-                        <span className="ar-chat-target" title={`Target: ${turn.target_vuln_title}`}>
-                          → {turn.target_vuln_title.slice(0, 30)}{turn.target_vuln_title.length > 30 ? "…" : ""}
-                        </span>
+                {chatTurns.map((turn, idx) => {
+                  // Detect session change for separator header
+                  const prevCategory = idx > 0 ? chatTurns[idx - 1].session_category : null;
+                  const isNewSession = turn.session_category && turn.session_category !== prevCategory;
+                  return (
+                    <div key={turn.id}>
+                      {isNewSession && (
+                        <div className="ar-session-header">
+                          <span className="ar-session-badge">
+                            Session: {turn.session_category?.toUpperCase() ?? "??"}
+                          </span>
+                        </div>
                       )}
-                      {turn.compromised && (
-                        <span className="ar-chat-compromised">⚠ COMPROMISED</span>
-                      )}
+                      <div
+                        className={`ar-chat-bubble ar-chat-bubble--${turn.sender} animate-fade-in-up`}
+                      >
+                        <div className="ar-chat-sender">
+                          {turn.sender === "attacker" ? "🎯 Attacker" : "🤖 Agent"}
+                          {turn.sender === "attacker" && turn.target_vuln_title && (
+                            <span className="ar-chat-target" title={`Target: ${turn.target_vuln_title}`}>
+                              → {turn.target_vuln_title.slice(0, 30)}{turn.target_vuln_title.length > 30 ? "…" : ""}
+                            </span>
+                          )}
+                          {turn.compromised && (
+                            <span className="ar-chat-compromised">⚠ COMPROMISED</span>
+                          )}
+                        </div>
+                        <p className="ar-chat-text">{turn.text}</p>
+                      </div>
                     </div>
-                    <p className="ar-chat-text">{turn.text}</p>
-                  </div>
-                ))}
+                  );
+                })}
                 <div ref={chatEndRef} />
               </div>
             </div>

@@ -130,6 +130,7 @@ export async function GET(request: NextRequest) {
       compromised: requireBoolean(t.compromised, "compromised"),
       target_vuln_id: t.target_vuln_id,
       target_vuln_title: t.target_vuln_title,
+      session_category: t.session_category,
       created_at: t.created_at,
     }));
 

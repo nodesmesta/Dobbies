@@ -11,6 +11,7 @@ const publicPaths = [
   "/_next/static",
   "/favicon.ico",
   "/dobbies.png",
+  "/api/notify/send",
 ];
 
 // Dev-only bypass for curl testing of audit pipeline.

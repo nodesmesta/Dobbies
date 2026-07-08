@@ -30,23 +30,26 @@ export function LiveAuditView({
   agent,
   onAuditComplete,
   onBack,
+  leftBasis = "clamp(420px, 58%, 860px)",
 }: {
   agent: DetectedAgent;
   onAuditComplete: (report: AuditReport) => void;
   onBack?: () => void;
+  /** Left column flex-basis; tuned so the runner doesn't push the
+   *  dedicated right card off-screen on common viewport widths. The
+   *  default clamps between 420px (no collapse) and 860px (full audit-
+   *  detail width), reserving at least the right column's 320px min. */
+  leftBasis?: string;
 }) {
   const live = useLiveAudit({ agent, onComplete: onAuditComplete });
 
   return (
     <div className="ard-page-container">
-      {/* LEFT column — fixed width mirrors the AuditResultDetail page's
-          `.ard-wrapper` slot. The runner fills this column with the
-          agent card, status log, and OWASP category list (mirrors
-          `.ard-vuln-list`). */}
+      {/* LEFT column — flexible basis; can shrink on tight viewports. */}
       <div
         style={{
-          flex: "0 0 860px",
-          maxWidth: "100%",
+          flex: `1 1 ${leftBasis}`,
+          maxWidth: leftBasis,
           width: "100%",
           minWidth: "0",
         }}

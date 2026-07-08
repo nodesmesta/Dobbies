@@ -1,22 +1,3 @@
-/**
- * POST /api/audit/stream
- *
- * Real-time audit pipeline using Server-Sent Events (SSE).
- *
- * Pipeline: RAG Static Analysis → Red-Team Simulation → Evaluator → Save
- *
- * Request:  { agentName, systemPrompt, tools, repoUrl, filePath, content, model? }
- * Response: SSE stream (text/event-stream)
- *   - event: status       → { message }
- *   - event: static_result → { score, vulnerabilities }
- *   - event: chat_turn    → { sender, text, compromised? }
- *   - event: final_result → { dynamicScore, overallScore, reportId, ... }
- *
- * Fail-loud contract:
- *   - Missing required fields throw before SSE starts (HTTP 400).
- *   - LLM failures throw inside the stream; we emit `event: error` and close.
- *   - Any silent skip / null-coerce that produces a fake success is removed.
- */
 import { NextRequest } from "next/server";
 import { analyzeWithRAG } from "@/lib/rag";
 import { generateAttack } from "@/lib/llm/attacker";
@@ -39,7 +20,6 @@ interface SandboxTurn {
   compromised: boolean;
   targetVulnId?: string;
   targetVulnTitle?: string | null;
-  /** OWASP category this turn's session belongs to */
   sessionCategory?: string;
 }
 
@@ -58,15 +38,6 @@ function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/**
- * Build a synthetic Vulnerability stub used as the per-turn attack target
- * when the static analyzer returned zero findings. Phase 2 must still
- * run (docs/landing-page contract) so we attach a placeholder vuln to
- * each default-probe category; the per-category session loop reads
- * `categoryVulns[i % categoryVulns.length]` to drive turn targets, and
- * the stub supplies the title/id fields the UI displays without injecting
- * a real finding into the final report.
- */
 function defaultProbeVuln(categoryId: OwaspCategoryId): Vulnerability {
   const label = OWASP_CATEGORY_LABELS[categoryId] ?? categoryId;
   return {
@@ -227,9 +198,6 @@ async function saveVulnerabilities(
   const idMap: Record<string, string> = {};
   const counts = { vulnerability_count: 0, critical_count: 0, high_count: 0, medium_count: 0, low_count: 0 };
 
-  // Track categories of vulnerabilities that the LLM detected but our catalogue
-  // does not know about. We surface this as a warning rather than silently
-  // dropping the row, and we skip the insert so the database FK is obeyed.
   const skippedCategories = new Set<string>();
 
   for (const vuln of vulnerabilities) {
@@ -260,11 +228,8 @@ async function saveVulnerabilities(
           `title="${vuln.title?.slice(0, 60)}": ${error.message} (code ${error.code})`,
       );
       if (error.code === "23503") {
-        // FK violation — vulnerability_categories does not have this id.
         skippedCategories.add(vuln.category_id);
       }
-      // For FK mismatch, skip silently for the index map but still count it in
-      // the final summary so the user sees what was discarded.
       continue;
     }
     if (inserted) {
@@ -312,15 +277,6 @@ async function saveSimulationTurns(
     };
   });
 
-  // Single batched insert. The previous per-row `await` loop silently
-  // dropped any failed row — Postgres RLS / FK errors were never surfaced,
-  // so the caller believed the rows existed when they didn't. The very
-  // recent `effective_severity = "low"` across-the-board bug was caused by
-  // an upper-layer orchestrator crash (TDZ) that prevented this loop from
-  // running at all; even when it runs, the silent-drop failure mode would
-  // have the same downstream effect (no PoC → all low). We now surface the
-  // error to the caller and they decide whether to mark the audit as
-  // degraded in `audit_reports`.
   const { error } = await supabase.from("simulation_turns").insert(rows);
   if (error) {
     return {
@@ -348,22 +304,6 @@ async function saveGuardrails(
   }
 }
 
-/**
- * Audit-grade provenance chain for GitHub-sourced content.
- *
- * Each field below answers a specific forensic question about the file the
- * audit was actually run against:
- *
- *   - content:     the bytes the LLM analyzer saw (deterministic per commit)
- *   - sha256:      cryptographic fingerprint of content (catches tampering)
- *   - bytes:       raw byte count (UTF-8 encoding; use new Blob([...]).size
- *                  on the wire-equivalent if you ever switch to non-text)
- *   - etag:        GitHub's response ETag — same on every GET until content
- *                  or branch moves; structurally equivalent to Blob SHA
- *   - sourceUrl:   the canonical URL the content was fetched from
- *   - commitSha:   the exact git commit of the file (NOT branch ref) so
- *                  audits can be replayed forever even if HEAD moves
- */
 interface FetchedContent {
   content: string;
   sha256: string;
@@ -373,10 +313,6 @@ interface FetchedContent {
   commitSha: string | null;
 }
 
-/**
- * SHA-256 of a UTF-8 string using Web Crypto API (available in both
- * Node.js 18+ runtime and Vercel Edge runtime).
- */
 async function sha256Hex(text: string): Promise<string> {
   const bytes = new TextEncoder().encode(text);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
@@ -385,13 +321,6 @@ async function sha256Hex(text: string): Promise<string> {
     .join("");
 }
 
-/**
- * Resolve owner/repo from a github.com URL. Accepts:
- *   - https://github.com/<owner>/<repo>
- *   - https://github.com/<owner>/<repo>.git
- *   - git@github.com:<owner>/<repo> (rare, via SSH)
- *   - https://github.com/<owner>/<repo>/tree/<branch>/<path>
- */
 function parseGithubRepoUrl(repoUrl: string): { owner: string; repo: string } | null {
   const httpsMatch = repoUrl.match(/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?(?:\/.*)?$/);
   if (httpsMatch) return { owner: httpsMatch[1], repo: httpsMatch[2] };
@@ -400,12 +329,6 @@ function parseGithubRepoUrl(repoUrl: string): { owner: string; repo: string } | 
   return null;
 }
 
-/**
- * Look up the latest commit that touched a specific file path. Uses the
- * public commits API without auth (rate-limited to 60 req/h per IP, plenty
- * for the audit use case). Returns null on any error so we degrade
- * gracefully — the raw content is still fetched and audited.
- */
 async function lookupLatestCommitSha(
   owner: string,
   repo: string,
@@ -430,20 +353,6 @@ async function lookupLatestCommitSha(
   }
 }
 
-/**
- * Fetch raw file content from GitHub via the raw.githubusercontent.com endpoint
- * together with the full provenance chain (sha256, etag, sourceUrl, commitSha).
- * Tries the default branch `main` first, then `master`. Throws on parse
- * failure or HTTP non-OK on both branches, so the caller can surface an
- * informative error message to the UI.
- *
- * This handles a real UI gap: RepoScanner.tsx constructs DetectedAgent with
- * `content: ""` when audit is triggered from scanned-repo history (where the
- * local `ScannedFile.content` was discarded via `ScannedFileWithStatus`).
- * Server-side fetch makes the audit pipeline robust to that gap without a
- * silent fallback — fetch either resolves with text + provenance chain, OR
- * throws with a reason.
- */
 async function fetchRepoFileContent(repoUrl: string, filePath: string): Promise<FetchedContent> {
   const parsed = parseGithubRepoUrl(repoUrl);
   if (!parsed) {
@@ -495,7 +404,6 @@ export async function POST(request: NextRequest) {
 
   const { agentName, systemPrompt, tools, repoUrl, filePath, content, model: modelBody } = body;
 
-  // Required input validation
   if (typeof agentName !== "string" || agentName.length === 0) {
     return new Response(
       sseEvent("error", { message: "agentName is required (non-empty string)" }),
@@ -503,18 +411,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Resolve the audit prompt. Order:
-  //   1. systemPrompt (if non-empty) — canonical
-  //   2. content (if non-empty) — raw source code paste or pre-fetched
-  //   3. GitHub raw fetch using repoUrl+filePath — covers UI flows where the
-  //      local scanner state lost the file content (e.g. audit from repo history)
-  //      The fetch is explicit, not silent: it logs the URL and resolves OR throws.
-  //
-  // `provenance` holds the audit-grade chain captured at fetch time. For path
-  // 3 it is populated from GitHub (sha256, etag, sourceUrl, commitSha). For
-  // path 1 & 2 (client-supplied) it remains null — we cannot prove the bytes
-  // we audited match repo bytes without re-fetching, which is intentional:
-  // better to leave the chain empty than to fake it.
   let prompt: string | undefined =
     typeof systemPrompt === "string" && systemPrompt.length > 0 ? systemPrompt :
     typeof content === "string" && content.length > 0 ? content :
@@ -567,10 +463,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // All forms of agents must be auditable: function-calling, prompt-only, and hybrids.
-  // Empty `tools` is valid input (chatbots without function calling still need LLMO01/06/09 audits).
-  // We synthesize an explicit placeholder so the LLM analyzer knows what it sees and downstream
-  // validation stays strict (no silent empty-string coerce).
   const toolList: DetectedAgentTool[] = tools;
   const toolNames = toolList.map((t) => t.name);
   const toolsDescription = toolList.length > 0
@@ -629,29 +521,14 @@ export async function POST(request: NextRequest) {
         ));
         await delay(400);
 
-        // OWASP category labels — typed as a wide record because the
-        // session loop indexes with arbitrary strings (real categoryIds
-        // from vulns + default-probe ids + LLM-emitted ids). The narrow
-        // Record<OwaspCategoryId, string> from types.ts is the
-        // authoritative source but we re-cast here so downstream code
-        // (legacy bracket accesses + ?? fallbacks) keeps typing clean.
         const CATEGORY_LABELS: Record<string, string> = OWASP_CATEGORY_LABELS as Record<string, string>;
 
-        // Group vulnerabilities by OWASP category
         const byCategory = new Map<string, Vulnerability[]>();
         for (const v of vulnerabilities) {
           if (!byCategory.has(v.category_id)) byCategory.set(v.category_id, []);
           byCategory.get(v.category_id)!.push(v);
         }
 
-        // Default-probe fallback: when the static analyzer returns zero
-        // findings (no category sessions would otherwise run), seed the
-        // per-category map with the three highest-yield runtime probes
-        // (LLM01/LLM06/LLM08). When the static analyzer returns some
-        // findings, ONLY add default probes for categories it did NOT
-        // already flag — running two parallel 3-turn red-team sessions
-        // for the same OWASP category wastes LLM calls and floods the
-        // transcript card with interleaved turns from the two sessions.
         if (byCategory.size === 0) {
           trace("phase 2: static returned 0 vulns — running default-probe sweep for whole OWASP Top 10 sweep set");
           controller.enqueue(encoder.encode(
@@ -665,9 +542,6 @@ export async function POST(request: NextRequest) {
             byCategory.set(cat, [defaultProbeVuln(cat)]);
           }
         } else {
-          // Static found something — only add missing default probes
-          // for categories that static did not flag, so we never run
-          // duplicate sessions for the same OWASP category.
           const existingCats = new Set(byCategory.keys());
           const missingDefaults = DEFAULT_DYNAMIC_PROBE_CATEGORIES.filter(
             (c) => !existingCats.has(c)
@@ -804,12 +678,7 @@ export async function POST(request: NextRequest) {
             })
           ));
 
-          // Accumulator writes now happen in the outer aggregation loop
-          // after `Promise.allSettled` resolves — see below. Doing the push
-          // inside this callback raced with the TDZ for those outer-scope
-          // consts and turned every category into a "rejected" job.
 
-          // SSE: session result
           const compromisedMsg = sessionEval.compromisedTurns.length > 0
             ? `⚠ ${sessionEval.compromisedTurns.length} turn(s) compromised`
             : "no compromise";
@@ -832,14 +701,6 @@ export async function POST(request: NextRequest) {
 
         const categoryResults = await Promise.allSettled(categoryJobs);
 
-        // Merge each category's resolved value back into the cross-category
-        // accumulators declared above (PRE-`await`, so inner callbacks don't
-        // hit TDZ). Accumulators MUST NOT be redeclared in this block — the
-        // previous version did exactly that, which is what crashed the
-        // categorization pipeline at runtime. Failures (LLM 5xx / TDZ /
-        // timeout / parse error) do not stop the audit — they are logged
-        // and skipped; the rest of the categories contribute normally to
-        // the headline score.
         const failed: string[] = [];
         for (const result of categoryResults) {
           if (result.status === "rejected") {
@@ -864,12 +725,6 @@ export async function POST(request: NextRequest) {
           trace(`[audit-stream] ${failed.length}/${categoryResults.length} categories failed; aggregating scores from the remaining categories only`);
         }
 
-        // ── Dynamic Vulnerability Extraction ──────────────────
-        // For any default-probe category where the agent was compromised,
-        // promote the probe finding into a real Vulnerability entry. This
-        // ensures dynamic findings appear in the final report, get post-
-        // verdict processing, and show up in the dashboard's vulnerability
-        // tab — not just buried in the simulation transcript.
         const probeToDynamicId: Record<string, string> = {};
         const dynamicVulns: Vulnerability[] = [];
 
@@ -929,8 +784,6 @@ export async function POST(request: NextRequest) {
         // ── PHASE 3: Aggregate Scores & Guardrails ────────────
         await delay(300);
 
-        // Overall dynamic score = worst (minimum) across all per-category sessions.
-        // If no vulnerabilities were found (0 categories), score is 100 (perfect).
         const dynamicScore = sessionScores.length > 0 ? Math.min(...sessionScores) : 100;
         const evaluationRisks: string[] = [];
         const evaluationRecommendations: string[] = [];
@@ -991,9 +844,6 @@ export async function POST(request: NextRequest) {
             dynamic_score: dynamicScore,
             overall_score: overallScore,
             status: "running",
-            // Provenance chain — only populated when the prompt was GitHub-fetched.
-            // For client-supplied systemPrompt/content (no GitHub fetch), these
-            // remain NULL so the provenance chain honestly reflects what we proved.
             content_sha256:      provenance?.contentSha256      ?? null,
             commit_sha:          provenance?.commitSha          ?? null,
             git_etag:            provenance?.gitEtag            ?? null,
@@ -1012,17 +862,10 @@ export async function POST(request: NextRequest) {
           const compromisedCount = simSave.compromisedCount;
           await saveGuardrails(supabase, reportId, guardrails);
 
-          // Post-simulation verdict: for each vuln, check whether any
-          // simulation turn targeted it AND the agent was compromised.
-          // Vulnerabilities with no demonstrated exploit are downgraded
-          // to 'low' (potential only) so the detail report distinguishes
-          // "finding with proof of concept" from "finding without PoC".
           const exploitedVulnIds = new Set<string>();
           const targetedVulnIds = new Set<string>();
           for (const turn of simulationLogs) {
             if (turn.target_vuln_id) {
-              // simulationLogs stores JS IDs; map through idMap to get DB UUIDs
-              // so the set check at line ~823 (against vulnDbId) works correctly.
               const dbId = idMap[turn.target_vuln_id];
               if (dbId) {
                 targetedVulnIds.add(dbId);
@@ -1050,8 +893,6 @@ export async function POST(request: NextRequest) {
             if (wasExploited) {
               effective = vuln.severity; // PoC confirmed → original severity stands
             } else {
-              // Either targeted-but-not-exploited, or not targeted at all.
-              // Downgrade critical/high/medium to 'low' (potential only).
               effective = "low";
             }
 
@@ -1077,8 +918,6 @@ export async function POST(request: NextRequest) {
             else postSimulationCounts.low_count++;
           }
 
-          // Recompute static_score and overall_score using EFFECTIVE severities
-          // so the headline numbers reflect what was actually demonstrated.
           const SEVERITY_DEDUCTIONS: Record<string, number> = {
             critical: 25, high: 15, medium: 10, low: 5,
           };

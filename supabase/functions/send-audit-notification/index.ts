@@ -1,15 +1,3 @@
-/**
- * send-audit-notification
- *
- * Supabase Edge Function triggered by the database after an audit report
- * is completed. This function:
- *   1. Receives report data from the trigger payload
- *   2. Looks up the user's email via the Auth Admin API
- *   3. Sends a notification email via the Resend API
- *
- * Trigger → net.http_post() → Edge Function → Resend API → ✉️ User
- */
-
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
 interface NotificationPayload {

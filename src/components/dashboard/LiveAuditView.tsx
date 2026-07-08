@@ -53,13 +53,17 @@ export function LiveAuditView({
 
   return (
     <div className="ard-page-container">
-      {/* LEFT column — flexible basis; can shrink on tight viewports.
-          When no transcript has arrived yet, the LEFT column takes
-          the full width and the RIGHT column is not in the DOM. */}
+      {/* LEFT column — flexible basis per the responsive clamp chosen
+          for the run-audit panel (option C): flex-basis clamps between
+          420px (no collapse) and 860px (audit-detail width) so a tight
+          viewport shrinks the runner gracefully without squeezing the
+          dedicated right card below its 320px min. width stays 100%
+          of the column's flex slot and min-width:0 prevents the
+          intrinsic content width from re-inflating the box. */}
       <div
         style={{
-          flex: hasTranscript ? `1 1 ${leftBasis}` : "1 1 100%",
-          maxWidth: hasTranscript ? leftBasis : "100%",
+          flex: `1 1 ${leftBasis}`,
+          maxWidth: leftBasis,
           width: "100%",
           minWidth: "0",
         }}

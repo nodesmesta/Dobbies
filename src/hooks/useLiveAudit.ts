@@ -49,6 +49,14 @@ export interface UseLiveAuditReturn {
   // Actions
   handleRunAudit: () => Promise<void>;
   setSelectedCategory: (cat: string | null) => void;
+  /** Final report, populated when SSE final_result arrives. Stays null
+   *  while the audit is running or if it failed mid-stream. The
+   *  dedicated completion CTA reads this and calls requestViewReport()
+   *  to navigate; it never auto-fires onComplete so the user keeps
+   *  the live transcript panel visible until they actually click
+   *  "View full audit report". */
+  finalReport: AuditReport | null;
+  requestViewReport: () => void;
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -73,6 +81,7 @@ export function useLiveAudit({ agent, onComplete }: UseLiveAuditArgs): UseLiveAu
   const [statusMessages, setStatusMessages] = useState<StatusMessage[]>([]);
   const [staticResult, setStaticResult]   = useState<UseLiveAuditReturn["staticResult"]>(null);
   const [phase, setPhase]                 = useState<LivePhase>("idle");
+  const [finalReport, setFinalReport]     = useState<AuditReport | null>(null);
 
   // Live transcript — bucketed per OWASP category because the parallel
   // pipeline delivers events interleaved across categories. We bucket
@@ -336,7 +345,14 @@ export function useLiveAudit({ agent, onComplete }: UseLiveAuditArgs): UseLiveAu
                   vulnerability_count: d.vulnerabilities?.length ?? 0,
                   compromised_count: d.simulationLogs?.filter((t) => t.compromised).length ?? 0,
                 };
-                if (onCompleteRef.current) onCompleteRef.current(finalReport);
+                // Store the finished report in hook state but DO NOT
+                // auto-call onComplete. The completion CTA in
+                // <AuditRunner/> fires requestViewReport() only when
+                // the user clicks the "View full audit report" button.
+                // This way the user can read through the live transcript
+                // card on the right column without being yanked away to
+                // the history-detail panel mid-thought.
+                setFinalReport(finalReport);
               }
             } catch {
               // Malformed SSE data — skip
@@ -368,5 +384,11 @@ export function useLiveAudit({ agent, onComplete }: UseLiveAuditArgs): UseLiveAu
     selectedCategory,
     handleRunAudit,
     setSelectedCategory,
+    finalReport,
+    requestViewReport: () => {
+      if (finalReport && onCompleteRef.current) {
+        onCompleteRef.current(finalReport);
+      }
+    },
   };
 }

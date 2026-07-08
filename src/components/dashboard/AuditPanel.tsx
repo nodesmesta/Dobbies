@@ -36,6 +36,7 @@ export function AuditRunner({
   statusEndRef,
   onSelectCategory,
   onRunAudit,
+  viewReport,
 }: {
   agent: DetectedAgent;
   onBack?: () => void;
@@ -48,6 +49,11 @@ export function AuditRunner({
   statusEndRef: React.RefObject<HTMLDivElement | null>;
   onSelectCategory: (cat: string | null) => void;
   onRunAudit: () => Promise<void>;
+  /** Completion CTA handler — wired to the hook's
+   * requestViewReport(), which fires onComplete() to navigate the
+   * caller. Only called when the user clicks the "View full audit
+   * report" button — never auto-fires when the SSE stream finishes. */
+  viewReport: () => void;
 }) {
   return (
     <div className="audit-runner">
@@ -193,6 +199,58 @@ export function AuditRunner({
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ── Completion CTA ────────────────────────────────────
+          Visible only when phase === "done". On click, fires
+          viewReport() which routes to the history-detail panel via
+          the parent's onAuditComplete callback. We deliberately don't
+          auto-redirect when SSE final_result arrives — the user
+          keeps the live transcript visible on the right column
+          (to scroll through previous turns if needed) until they
+          actively decide to view the structured report. */}
+      {phase === "done" && (
+        <div className="ar-complete-cta animate-fade-in-up">
+          <div className="ar-complete-cta-head">
+            <span className="ar-complete-cta-icon">
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path d="M3 8l3.5 3.5L13 5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </span>
+            <div>
+              <strong>Audit complete</strong>
+              <span className="ar-complete-cta-sub">
+                Multi-turn red-team simulation finished. Review the live
+                transcript on the right, or jump to the structured report
+                whenever you're ready.
+              </span>
+            </div>
+          </div>
+          <div className="ar-complete-cta-buttons">
+            <button
+              id="btn-view-report"
+              type="button"
+              className="ar-view-report-btn"
+              onClick={viewReport}
+            >
+              View full audit report
+              <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+                <path d="M2 7h10M8 3l4 4-4 4"
+                  stroke="currentColor" strokeWidth="1.6"
+                  strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+            </button>
+            {onBack && (
+              <button
+                type="button"
+                className="ar-run-another-btn"
+                onClick={onBack}
+              >
+                Audit another repo
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>

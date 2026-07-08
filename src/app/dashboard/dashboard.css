@@ -1711,6 +1711,125 @@
 }
 .ar-back-btn:hover { color: var(--color-text-secondary); }
 
+/* Completion CTA — surfaces inside the left column after SSE
+   final_result fires. We deliberately don't auto-redirect — the
+   user gets an explicit "View full audit report →" button so they
+   can scroll through the live transcript card on the right column
+   before jumping to the structured report. */
+.ar-complete-cta {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 1rem 1.125rem;
+  background: var(--color-surface-3);
+  border: 1px solid var(--color-accent-green);
+  border-radius: var(--radius-md);
+  min-width: 0;
+  box-sizing: border-box;
+}
+.ar-complete-cta-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.625rem;
+  font-size: 0.8125rem;
+}
+.ar-complete-cta-icon {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem; height: 1.75rem;
+  border-radius: 999px;
+  background: rgba(52, 211, 153, 0.12);
+  color: var(--color-accent-green);
+}
+.ar-complete-cta-head strong {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  letter-spacing: 0.01em;
+}
+.ar-complete-cta-sub {
+  display: block;
+  font-size: 0.75rem;
+  color: var(--color-text-secondary);
+  line-height: 1.5;
+  margin-top: 0.125rem;
+}
+.ar-complete-cta-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.ar-view-report-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.55rem 1rem;
+  background: var(--color-accent-green);
+  color: #07101d;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+  font-weight: 700;
+  cursor: pointer;
+  font-family: inherit;
+  transition: transform 0.12s ease, filter 0.15s ease, box-shadow 0.15s ease;
+  white-space: nowrap;
+}
+.ar-view-report-btn:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.05);
+  box-shadow: 0 6px 14px rgba(52, 211, 153, 0.2);
+}
+.ar-view-report-btn:active {
+  transform: translateY(0);
+  filter: brightness(0.95);
+}
+.ar-run-another-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.55rem 0.875rem;
+  background: transparent;
+  color: var(--color-text-secondary);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: inherit;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+  white-space: nowrap;
+}
+.ar-run-another-btn:hover {
+  color: var(--color-text-primary);
+  border-color: rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+@media (max-width: 680px) {
+  .ar-complete-cta {
+    padding: 0.875rem 0.875rem;
+    gap: 0.5rem;
+  }
+  .ar-complete-cta-head { font-size: 0.75rem; gap: 0.5rem; }
+  .ar-complete-cta-head strong { font-size: 0.8125rem; }
+  .ar-complete-cta-sub { font-size: 0.7rem; }
+  .ar-view-report-btn,
+  .ar-run-another-btn {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.75rem;
+    flex: 1 1 auto;
+  }
+  .ar-complete-cta-buttons {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
 .ar-agent-meta {
   display: flex;
   align-items: flex-start;

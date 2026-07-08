@@ -80,6 +80,7 @@ export function LiveAuditView({
           statusEndRef={live.statusEndRef}
           onSelectCategory={live.setSelectedCategory}
           onRunAudit={live.handleRunAudit}
+          viewReport={live.requestViewReport}
         />
       </div>
 

@@ -882,6 +882,68 @@ export async function POST(request: NextRequest) {
           trace(`[audit-stream] ${failed.length}/${categoryResults.length} categories failed; aggregating scores from the remaining categories only`);
         }
 
+        // ── Dynamic Vulnerability Extraction ──────────────────
+        // For any default-probe category where the agent was compromised,
+        // promote the probe finding into a real Vulnerability entry. This
+        // ensures dynamic findings appear in the final report, get post-
+        // verdict processing, and show up in the dashboard's vulnerability
+        // tab — not just buried in the simulation transcript.
+        const probeToDynamicId: Record<string, string> = {};
+        const dynamicVulns: Vulnerability[] = [];
+
+        for (const result of categoryResults) {
+          if (result.status === "rejected") continue;
+          const { category: catId, transcript, eval: sessionEval } = result.value;
+
+          // Skip if static analysis already flagged this category
+          const coveredByStatic = vulnerabilities.some((v) => v.category_id === catId);
+          if (coveredByStatic) continue;
+
+          // Only promote default probes that were actually compromised
+          if (sessionEval.compromisedTurns.length === 0) continue;
+
+          const label = OWASP_CATEGORY_LABELS[catId as OwaspCategoryId] ?? catId;
+          const probeId = `probe-${catId.toLowerCase()}`;
+          const dynamicId = `dynamic-${catId.toLowerCase()}`;
+          probeToDynamicId[probeId] = dynamicId;
+
+          trace(`[audit-stream] promoting default probe ${probeId} → dynamic vuln ${dynamicId} (${sessionEval.compromisedTurns.length} compromised turns)`);
+
+          dynamicVulns.push({
+            id: dynamicId,
+            title: `🛡 Dynamic finding — ${label}`,
+            severity: "high",
+            category_id: catId,
+            category_name: label,
+            exploitation_demonstrated: true,
+            description:
+              `Red-team simulation demonstrated a ${label} (${catId}) vulnerability that ` +
+              `static analysis did not detect. The agent was compromised on ` +
+              `${sessionEval.compromisedTurns.length} turn(s) during a ` +
+              `${transcript.length}-message default-probe session.`,
+            remediation:
+              `Apply OWASP mitigation patterns for ${catId} (${label}). ` +
+              `Dynamic findings supersede static absence — the agent is exploitable ` +
+              `in practice despite clean static analysis.`,
+            root_cause:
+              `Runtime red-team probe exposed a ${label} weakness not identified by ` +
+              `static analysis of the agent system prompt / tool definitions.`,
+            impact:
+              "The agent was exploitable in practice despite clean static results.",
+            cvss_score: 7.0,
+            file_path: null,
+            line_number: null,
+            code_snippet: null,
+            attack_path: null,
+            status: "open",
+          });
+        }
+
+        if (dynamicVulns.length > 0) {
+          vulnerabilities.push(...dynamicVulns);
+          trace(`[audit-stream] injected ${dynamicVulns.length} dynamic vuln(s) into the final report (IDs: ${dynamicVulns.map((v) => v.id).join(", ")})`);
+        }
+
         // ── PHASE 3: Aggregate Scores & Guardrails ────────────
         await delay(300);
 
@@ -923,7 +985,7 @@ export async function POST(request: NextRequest) {
           sender: turn.sender,
           text: turn.text,
           compromised: turn.compromised,
-          target_vuln_id: turn.targetVulnId ?? null,
+          target_vuln_id: turn.targetVulnId ? (probeToDynamicId[turn.targetVulnId] ?? turn.targetVulnId) : null,
           session_category: turn.sessionCategory ?? null,
         }));
 

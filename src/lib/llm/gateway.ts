@@ -76,8 +76,8 @@ export async function callLlm(opts: LlmCallOptions): Promise<string> {
     }
   }
 
-  if (!process.env.OPENAI_API_KEY) {
-    throw new LlmError("boundary_invalid", opts.role, "validation", "OPENAI_API_KEY is not configured");
+  if (!process.env.FIREWORK_API_KEY) {
+    throw new LlmError("boundary_invalid", opts.role, "validation", "FIREWORK_API_KEY is not configured");
   }
 
   // 2. Resolve role config + apply overrides.
@@ -90,7 +90,7 @@ export async function callLlm(opts: LlmCallOptions): Promise<string> {
 
   const transportOpts = {
     baseUrl: config.baseUrl,
-    apiKey: process.env.OPENAI_API_KEY!,
+    apiKey: process.env.FIREWORK_API_KEY!,
     model: config.primaryModel,
     messages: opts.messages,
     temperature: opts.temperatureOverride ?? config.temperature,

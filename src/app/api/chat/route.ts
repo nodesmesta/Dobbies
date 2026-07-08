@@ -20,7 +20,7 @@ export async function POST(request: NextRequest) {
     // Boundary check + env fallback are gateway's job. We just check the
     // precondition that the dobbies-chat role has a model configured
     // (gateway's LlmError("boundary_invalid", "dobbies-chat", ...) handles
-    // OPENAI_API_KEY / DOBBIES_CHAT_MODEL / default fallback to "openai/gpt-4o").
+    // FIREWORK_API_KEY / DOBBIES_CHAT_MODEL / default fallback).
     const systemPrompt: ChatMessage = {
       role: "system",
       content: `You are the Dobbies security assistant, a helpful and knowledgeable AI security specialist built to guide developers in auditing and securing their AI agents.
@@ -53,7 +53,7 @@ Provide clear, actionable, and secure coding practices. Keep your responses conc
     // Boundary errors (config / input) → 503/400; transport errors → 502;
     // generic 500 for everything else. Caller-side role is "dobbies-chat",
     // so any classification can be sender-derived.
-    const status = error instanceof Error && /OPENAI_API_KEY|No model configured|dobbies chat/i.test(error.message)
+    const status = error instanceof Error && /FIREWORK_API_KEY|No model configured|dobbies chat/i.test(error.message)
       ? 503
       : 500;
     return NextResponse.json({ error: message }, { status });

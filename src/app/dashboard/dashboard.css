@@ -2690,20 +2690,10 @@
   box-sizing: border-box;
 }
 
-.sim-empty-shell {
-  background: var(--color-surface-3);
-  border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-lg);
-  padding: 1.5rem;
-  text-align: center;
-  color: var(--color-text-muted);
-  font-size: 0.85rem;
-  min-width: 0;
-  max-width: 100%;
-  overflow-x: hidden;
-  box-sizing: border-box;
-}
-.sim-empty-shell p { margin: 0.375rem 0; }
+/* Pre-audit placeholder was removed: the right column is now mounted
+   only when the first OWASP category lands (LiveAuditView gates the
+   DOM), so a static empty-shell card on the right would still be
+   dangling beside an idle agent. */
 
 .sim-empty-hint {
   text-align: center;
@@ -2982,9 +2972,6 @@
   .sim-live-card {
     padding: 1rem;
     gap: 1rem;
-  }
-  .sim-empty-shell {
-    padding: 1rem;
   }
 
   /* Status log / section bodies / turn dividers — make sure

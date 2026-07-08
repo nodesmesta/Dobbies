@@ -37,7 +37,7 @@ export function LiveAuditView({
   agent,
   onAuditComplete,
   onBack,
-  leftBasis = "clamp(420px, 58%, 860px)",
+  leftBasis = "clamp(420px, 58%, 740px)",
 }: {
   agent: DetectedAgent;
   onAuditComplete: (report: AuditReport) => void;

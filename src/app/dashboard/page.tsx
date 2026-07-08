@@ -218,11 +218,15 @@ export default function DashboardPage() {
               agent={selectedAgent}
               onAuditComplete={handleAuditComplete}
               onBack={() => setPanelView("scan-repo")}
-              /* Layout numbers for the run-audit panel are explicit so we
-                 don't fight the generic 860px fixed-mixin in
-                 ard-page-container: left basis shrinks when viewport is
-                 tight, right column holds the dedicated card. */
-              leftBasis={"clamp(420px, 58%, 860px)"}
+              /* Left column max-width matches the RepoScanner panel
+                 (.rs-root, max-width: 740px + padding 1.5rem) so the
+                 runner card, status log, and OWASP category list all
+                 share the same visual width budget as the dashboard's
+                 Scan Repository surface. Right column reserved for the
+                 dedicated live red-team transcript card. The 58%
+                 middle term preserves the responsive shrink against
+                 sub-740 viewports. */
+              leftBasis={"clamp(420px, 58%, 740px)"}
             />
           )}
 

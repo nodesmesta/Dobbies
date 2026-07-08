@@ -644,18 +644,16 @@ export async function POST(request: NextRequest) {
           byCategory.get(v.category_id)!.push(v);
         }
 
-        // Fallback: when the static analyzer returns zero findings, the
-        // docs/landing-page contract still requires the dynamic phase to
-        // run — "live multi-turn red-team simulation" is a core product
-        // promise, not an optional void when static is clean. We seed
-        // byCategory with a default probe set (the three highest-yield
-        // OWASP categories — direct prompt injection, sensitive-info
-        // disclosure, and excessive agency) and let the per-category
-        // session loop run normally. Each default probe carries a
-        // synthetic Vulnerability stub so the existing turn-mapping code
-        // (targetVuln?.title etc.) keeps working without branches.
+        // Default-probe fallback: when the static analyzer returns zero
+        // findings (no category sessions would otherwise run), seed the
+        // per-category map with the three highest-yield runtime probes
+        // (LLM01/LLM06/LLM08). When the static analyzer returns some
+        // findings, ONLY add default probes for categories it did NOT
+        // already flag — running two parallel 3-turn red-team sessions
+        // for the same OWASP category wastes LLM calls and floods the
+        // transcript card with interleaved turns from the two sessions.
         if (byCategory.size === 0) {
-          trace("phase 2: static returned 0 vulns — falling back to default-probe categories for dynamic run");
+          trace("phase 2: static returned 0 vulns — running default-probe sweep for whole OWASP Top 10 sweep set");
           controller.enqueue(encoder.encode(
             sseEvent("status", {
               message: `Static analysis found no planted vulnerabilities — running default red-team probes on ${
@@ -666,9 +664,31 @@ export async function POST(request: NextRequest) {
           for (const cat of DEFAULT_DYNAMIC_PROBE_CATEGORIES) {
             byCategory.set(cat, [defaultProbeVuln(cat)]);
           }
+        } else {
+          // Static found something — only add missing default probes
+          // for categories that static did not flag, so we never run
+          // duplicate sessions for the same OWASP category.
+          const existingCats = new Set(byCategory.keys());
+          const missingDefaults = DEFAULT_DYNAMIC_PROBE_CATEGORIES.filter(
+            (c) => !existingCats.has(c)
+          );
+          if (missingDefaults.length > 0) {
+            trace(`phase 2: adding default probes for categories not covered by static: ${missingDefaults.join(", ")}`);
+            controller.enqueue(encoder.encode(
+              sseEvent("status", {
+                message: `⚔️ Default-probe sweep extends coverage to ${missingDefaults.join(", ")} (not flagged by static)`,
+              })
+            ));
+            for (const cat of missingDefaults) {
+              byCategory.set(cat, [defaultProbeVuln(cat)]);
+            }
+          }
+        }
+
+        if (byCategory.size > 0) {
           controller.enqueue(encoder.encode(
             sseEvent("status", {
-              message: `⚔️ Default-probe sweep: ${Array.from(byCategory.keys()).join(", ")}`,
+              message: `⚔️ Dynamic red-team running for ${byCategory.size} OWASP categories: ${Array.from(byCategory.keys()).join(", ")}`,
             })
           ));
         }

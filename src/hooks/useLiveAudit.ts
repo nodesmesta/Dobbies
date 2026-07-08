@@ -7,9 +7,7 @@ import {
   SimulationTurn,
   GuardrailConfig,
   DetectedAgent,
-  OWASP_CATEGORY_IDS,
   OWASP_CATEGORY_LABELS,
-  OwaspCategoryId,
 } from "@/lib/audit/types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -116,24 +114,16 @@ export function useLiveAudit({ agent, onComplete }: UseLiveAuditArgs): UseLiveAu
     setStatusMessages([]);
     setSessions(new Map());
 
-    // Pre-seed the OWASP category list with all 10 buckets in running
-    // state so the user immediately sees the live simulation checklist
-    // when an audit starts, regardless of whether the static analyzer
-    // produces findings. This matches the docs/landing-page contract
-    // that "multi-turn red-team simulation runs for every audit" — the
-    // list is visible from the first SSE byte, not gated on
-    // static_result. Static findings then increment vuln counts per
-    // category; chat_turn events add per-turn data; partial_score flips
-    // each bucket to "done" as its session finishes.
-    const initialCategories = new Map<string, CategoryMeta>();
-    for (const cat of OWASP_CATEGORY_IDS) {
-      initialCategories.set(cat, {
-        label: OWASP_CATEGORY_LABELS[cat],
-        status: "running",
-        vulns: 0,
-      });
-    }
-    setCategoryMeta(initialCategories);
+    // Categories are seeded lazily — first from static_result (increments
+    // a skeleton bucket per category_id from the RAG findings), then
+    // from each chat_turn and partial_score event. We deliberately do
+    // NOT pre-seed all 10 OWASP categories here because the backend
+    // only runs dynamic sessions for `static categories ∪ default
+    // probes that were missing` — the union is usually smaller than 10,
+    // so a hard pre-seed would leave phantom "running" badges that never
+    // flip to "done". Lazy seeding mirrors exactly which categories the
+    // server is actually probing.
+    setCategoryMeta(new Map());
 
     setSelectedCategory(null);
     setStaticResult(null);
@@ -255,6 +245,26 @@ export function useLiveAudit({ agent, onComplete }: UseLiveAuditArgs): UseLiveAu
                   sessionCategory?: string;
                 };
                 const cat = d.sessionCategory ?? "_unknown";
+                // Lazy-seed the categoryMeta entry. The first chat_turn
+                // for a category can arrive before static_result (e.g.
+                // default-probe fallback when static returned 0 vulns),
+                // so we don't wait for any prior category hint to know
+                // there's a session running for this OWASP code.
+                setCategoryMeta((prev) => {
+                  if (prev.has(cat)) return prev;
+                  const next = new Map(prev);
+                  // The server can emit sessionCategory for default-probe
+                  // sessions too; the indexed lookup is safe because we
+                  // either hit one of the canonical OWASP ids (label
+                  // resolved) or fall through to the raw id string.
+                  const labels = OWASP_CATEGORY_LABELS as Record<string, string>;
+                  next.set(cat, {
+                    label: labels[cat] ?? cat,
+                    status: "running",
+                    vulns: 0,
+                  });
+                  return next;
+                });
                 setSessions((prev) => {
                   const next = new Map(prev);
                   const arr = next.get(cat) ?? [];
@@ -274,8 +284,9 @@ export function useLiveAudit({ agent, onComplete }: UseLiveAuditArgs): UseLiveAu
                   ]);
                   return next;
                 });
-                // First chat_turn for the audit just landed — set selectedCategory
-                // so the right card has content right away. Only assign when null.
+                // First chat_turn for a category just landed — set selectedCategory
+                // to it so the right pane has content right away. We only assign
+                // when curr is null (first event for the whole audit).
                 setSelectedCategory((curr) => (curr === null ? cat : curr));
               } else if (currentEvent === "partial_score") {
                 const d = data as { category: string; label: string; score: number; compromised: number };

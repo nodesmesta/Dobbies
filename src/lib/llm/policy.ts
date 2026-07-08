@@ -88,10 +88,10 @@ function resolvePrimaryModel(role: LlmRole, override?: string): string {
   if (override && override.length > 0) return override;
 
   if (role === "dobbies-chat") {
-    // Uses the same Fireworks deployment as the audit pipeline —
-    // accounts/nodesemesta-qatykx4j/deployments/clk368gq — unless the
-    // operator explicitly sets DOBBIES_CHAT_MODEL.
-    return process.env.DOBBIES_CHAT_MODEL?.trim() || "accounts/nodesemesta-qatykx4j/deployments/clk368gq";
+    // Uses the same Fireworks model as the audit pipeline —
+    // accounts/fireworks/models/minimax-m3 — unless the operator
+    // explicitly sets DOBBIES_CHAT_MODEL.
+    return process.env.DOBBIES_CHAT_MODEL?.trim() || "accounts/fireworks/models/minimax-m3";
   }
 
   const fromEnv = process.env.AUDIT_MODEL?.trim();

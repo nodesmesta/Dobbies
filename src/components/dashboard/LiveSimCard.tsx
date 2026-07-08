@@ -3,8 +3,6 @@
 import { Fragment, useRef, useEffect } from "react";
 import { SimulationTurn } from "@/lib/audit/types";
 import type { CategoryMeta } from "@/hooks/useLiveAudit";
-
-// ─── LiveSimCard — RIGHT COLUMN on the dashboard ─────────────────────────────
 /**
  * The dedicated transcript card for a live red-team simulation. Lives on
  * the RIGHT column of `<LiveAuditView/>` — the `.ard-vuln-detail-panel`
@@ -12,9 +10,12 @@ import type { CategoryMeta } from "@/hooks/useLiveAudit";
  * detail page's split. Mirrors the visual rhythm of `<VulnDetailCard/>`:
  * surface-3 + radius-lg + padding 1.5rem + column gap 1.25rem.
  *
- * Content adapts VulnDetailCard's 9-section idiom to a live conversation:
- * per turn, ATTACKER PROMPT + AGENT RESPONSE in monospace, plus a
- * per-category EVAL footer at the bottom when the category finishes.
+ * Content renders as a chat-bubble timeline (the live audit idiom before
+ * the vertical-section rewrite): each turn emits an ATTACKER bubble
+ * (left-aligned, red theme) followed by an AGENT bubble (right-aligned,
+ * green theme) with a compromised-pill when the agent yielded to the
+ * attack. Between turns, an inline divider shows the target vuln title
+ * and turn number so users can scan the conversation chronologically.
  *
  * We render `.sim-live-card` directly inside the parent
  * `.ard-vuln-detail-panel`. The parent already supplies
@@ -63,9 +64,9 @@ export function LiveSimCard({
       );
     } else {
       // Group turns into pairs (attacker → agent) — one conversational
-      // round per section, like VulnDetailCard's 9-section document but
-      // trimmed to the live flow (attacker prompt + agent response +
-      // per-category eval footer).
+      // round per pair of bubbles. Pairs share a turn number + target
+      // vuln title on a divider above them, like the chat timeline
+      // before the vertical-section rewrite.
       const pairs: Array<{
         turnNumber: number;
         vulnTitle: string | null;
@@ -92,8 +93,10 @@ export function LiveSimCard({
           </div>
           {pairs.map((pair, idx) => (
             // Each turn is a logical sequence inside the .sim-live-card
-            // (no nested wrapper block). Divider + 2 sections — VulnDetailCard's
-            // 9-section document, adapted to live turns.
+            // (no nested wrapper block). Divider + 2 chat rows — the
+            // classic chat timeline: attacker bubble left, agent bubble
+            // right. Turn number + target vuln title sit on the divider
+            // so the conversation is scannable chronologically.
             <Fragment key={idx}>
               {pair.vulnTitle && (
                 <div className="sim-turn-divider">
@@ -102,25 +105,23 @@ export function LiveSimCard({
                 </div>
               )}
               {pair.attackerText && (
-                <section className="sim-section">
-                  <div className="sim-section-label sim-section-label--attacker">🎯 Attacker Prompt</div>
-                  <div className="sim-section-body">{pair.attackerText}</div>
-                </section>
+                <div className="ar-chat-row ar-chat-row--attacker">
+                  <div className="ar-chat-bubble ar-chat-bubble--attacker">
+                    <span className="ar-chat-sender">Attacker</span>
+                    <span className="ar-chat-text">{pair.attackerText}</span>
+                  </div>
+                </div>
               )}
               {pair.agentText && (
-                <section
-                  className={`sim-section sim-section--agent${
-                    pair.compromised ? " sim-section--compromised" : ""
-                  }`}
-                >
-                  <div className="sim-section-label sim-section-label--agent">
-                    🤖 Agent Response
+                <div className="ar-chat-row ar-chat-row--agent">
+                  <div className="ar-chat-bubble ar-chat-bubble--agent">
+                    <span className="ar-chat-sender">Agent</span>
                     {pair.compromised && (
-                      <span className="sim-section-warning">⚠ Compromised</span>
+                      <span className="ar-chat-compromised">⚠ Compromised</span>
                     )}
+                    <span className="ar-chat-text">{pair.agentText}</span>
                   </div>
-                  <div className="sim-section-body">{pair.agentText}</div>
-                </section>
+                </div>
               )}
             </Fragment>
           ))}

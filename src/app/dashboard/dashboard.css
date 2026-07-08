@@ -2985,11 +2985,22 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .sim-section-body {
-    font-size: 0.75rem;
-    line-height: 1.55;
-    padding: 0.625rem 0.75rem;
+
+  /* Bubble pair on the dedicated transcript card — chat timeline
+     rendered inside the right column. Bubbles stay ~88% of card
+     width on mobile too, but the rows go full-width so attacker
+     and agent bubbles each have room to render side-by-side. */
+  .ar-chat-bubble {
+    max-width: 88%;
+    padding: 0.625rem 0.875rem;
   }
+  .ar-chat-text {
+    font-size: 0.8125rem;
+    line-height: 1.5;
+  }
+  .ar-chat-sender { font-size: 0.65rem; }
+  .ar-chat-target { max-width: 140px; }
+
   .sim-eval-footer {
     flex-wrap: wrap;
     gap: 0.375rem;

@@ -4,6 +4,7 @@
 /node_modules
 /.pnp
 .pnp.*
+/package-lock.json
 .yarn/*
 !.yarn/patches
 !.yarn/plugins
@@ -41,8 +42,6 @@ yarn-error.log*
 # data — external files di luar project scope, tidak perlu di-repo
 /data
 
-# Hermes agent files — per-machine state, tidak boleh masuk repo
-.hermes/
 skills-lock.json
 AGENTS.md
 CLAUDE.md

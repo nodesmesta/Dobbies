@@ -24,7 +24,14 @@ import { generateAgentResponse } from "@/lib/llm/agent";
 import { evaluateTranscript } from "@/lib/llm/evaluator";
 import { createClient } from "@/utils/supabase/server";
 import type { DetectedAgentTool } from "@/lib/github/types";
-import type { Vulnerability, SimulationTurn, GuardrailConfig } from "@/lib/audit/types";
+import {
+  Vulnerability,
+  SimulationTurn,
+  GuardrailConfig,
+  OWASP_CATEGORY_LABELS,
+  DEFAULT_DYNAMIC_PROBE_CATEGORIES,
+  OwaspCategoryId,
+} from "@/lib/audit/types";
 
 interface SandboxTurn {
   sender: "attacker" | "agent";
@@ -49,6 +56,42 @@ function sseEvent(event: string, data: unknown): string {
 
 function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Build a synthetic Vulnerability stub used as the per-turn attack target
+ * when the static analyzer returned zero findings. Phase 2 must still
+ * run (docs/landing-page contract) so we attach a placeholder vuln to
+ * each default-probe category; the per-category session loop reads
+ * `categoryVulns[i % categoryVulns.length]` to drive turn targets, and
+ * the stub supplies the title/id fields the UI displays without injecting
+ * a real finding into the final report.
+ */
+function defaultProbeVuln(categoryId: OwaspCategoryId): Vulnerability {
+  const label = OWASP_CATEGORY_LABELS[categoryId] ?? categoryId;
+  return {
+    id: `probe-${categoryId.toLowerCase()}`,
+    title: `Default runtime probe — ${label}`,
+    severity: "high",
+    description:
+      `Static analysis did not surface a planted ${categoryId} finding. ` +
+      `Dynamic red-team still uses this target so the OWASP LLM Top 10 ` +
+      `multi-turn simulation runs as documented.`,
+    root_cause: "Default probe target — not a real static finding.",
+    impact:
+      "If the agent yields under default probe patterns, the runtime " +
+      "demonstrates a real exploit even when static defenses looked clean.",
+    remediation:
+      "Apply OWASP mitigation patterns for this category irrespective of " +
+      "static results — dynamic findings supersede static absence here.",
+    cvss_score: 7.0,
+    file_path: null,
+    line_number: null,
+    code_snippet: null,
+    status: "open",
+    category_id: categoryId,
+    category_name: label,
+  };
 }
 
 // ─── Guardrail generation ─────────────────────────────────────
@@ -586,24 +629,48 @@ export async function POST(request: NextRequest) {
         ));
         await delay(400);
 
-        const CATEGORY_LABELS: Record<string, string> = {
-          LLM01: "Prompt Injection",
-          LLM02: "Insecure Output Handling",
-          LLM03: "Training Data Poisoning",
-          LLM04: "Model DoS",
-          LLM05: "Supply Chain",
-          LLM06: "Sensitive Info Disclosure",
-          LLM07: "Insecure Plugin Design",
-          LLM08: "Excessive Agency",
-          LLM09: "Overreliance",
-          LLM10: "Model Theft",
-        };
+        // OWASP category labels — typed as a wide record because the
+        // session loop indexes with arbitrary strings (real categoryIds
+        // from vulns + default-probe ids + LLM-emitted ids). The narrow
+        // Record<OwaspCategoryId, string> from types.ts is the
+        // authoritative source but we re-cast here so downstream code
+        // (legacy bracket accesses + ?? fallbacks) keeps typing clean.
+        const CATEGORY_LABELS: Record<string, string> = OWASP_CATEGORY_LABELS as Record<string, string>;
 
         // Group vulnerabilities by OWASP category
         const byCategory = new Map<string, Vulnerability[]>();
         for (const v of vulnerabilities) {
           if (!byCategory.has(v.category_id)) byCategory.set(v.category_id, []);
           byCategory.get(v.category_id)!.push(v);
+        }
+
+        // Fallback: when the static analyzer returns zero findings, the
+        // docs/landing-page contract still requires the dynamic phase to
+        // run — "live multi-turn red-team simulation" is a core product
+        // promise, not an optional void when static is clean. We seed
+        // byCategory with a default probe set (the three highest-yield
+        // OWASP categories — direct prompt injection, sensitive-info
+        // disclosure, and excessive agency) and let the per-category
+        // session loop run normally. Each default probe carries a
+        // synthetic Vulnerability stub so the existing turn-mapping code
+        // (targetVuln?.title etc.) keeps working without branches.
+        if (byCategory.size === 0) {
+          trace("phase 2: static returned 0 vulns — falling back to default-probe categories for dynamic run");
+          controller.enqueue(encoder.encode(
+            sseEvent("status", {
+              message: `Static analysis found no planted vulnerabilities — running default red-team probes on ${
+                DEFAULT_DYNAMIC_PROBE_CATEGORIES.length
+              } core OWASP categories...`,
+            })
+          ));
+          for (const cat of DEFAULT_DYNAMIC_PROBE_CATEGORIES) {
+            byCategory.set(cat, [defaultProbeVuln(cat)]);
+          }
+          controller.enqueue(encoder.encode(
+            sseEvent("status", {
+              message: `⚔️ Default-probe sweep: ${Array.from(byCategory.keys()).join(", ")}`,
+            })
+          ));
         }
 
         trace(`phase 2 start: ${byCategory.size} OWASP categories (parallel across categories)`);

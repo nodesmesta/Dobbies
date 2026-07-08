@@ -12,6 +12,53 @@ export type AuditStatus = "completed" | "running" | "failed";
 export type VulnStatus = "open" | "confirmed" | "fixed" | "wontfix";
 
 /**
+ * Canonical OWASP LLM Top 10 categories. Single source of truth — used
+ * by both the backend (per-category session orchestration in
+ * /api/audit/stream/route.ts) and the frontend (UI pre-seed of the
+ * category list before any data lands). Order is the official OWASP
+ * ranking; labels are displayed verbatim on the dashboard.
+ *
+ * When the static analyzer returns zero vulnerabilities, the backend
+ * uses this list to select a default-probe subset (LLM01 + LLM06 +
+ * LLM08) so the dynamic red-team phase still runs — see
+ * DEFAULT_DYNAMIC_PROBE_CATEGORIES below.
+ */
+export const OWASP_CATEGORY_IDS = [
+  "LLM01", "LLM02", "LLM03", "LLM04", "LLM05",
+  "LLM06", "LLM07", "LLM08", "LLM09", "LLM10",
+] as const;
+export type OwaspCategoryId = typeof OWASP_CATEGORY_IDS[number];
+
+export const OWASP_CATEGORY_LABELS: Record<OwaspCategoryId, string> = {
+  LLM01: "Prompt Injection",
+  LLM02: "Insecure Output Handling",
+  LLM03: "Training Data Poisoning",
+  LLM04: "Model DoS",
+  LLM05: "Supply Chain",
+  LLM06: "Sensitive Info Disclosure",
+  LLM07: "Insecure Plugin Design",
+  LLM08: "Excessive Agency",
+  LLM09: "Overreliance",
+  LLM10: "Model Theft",
+};
+
+/**
+ * Subset of OWASP categories that the dynamic red-team pipeline always
+ * probes when static analysis returns zero findings. Chosen because they
+ * cover the three most commonly exploited agent attack surfaces:
+ *   - LLM01: direct prompt injection (jailbreak / role-play)
+ *   - LLM06: sensitive info disclosure (system prompt exfil, secrets)
+ *   - LLM08: excessive agency (tool abuse / unauthorized actions)
+ *
+ * When static is clean, these categories still get a 3-turn red-team
+ * session so we honor the docs/landing-page promise: every audit runs a
+ * multi-turn simulation regardless of static findings.
+ */
+export const DEFAULT_DYNAMIC_PROBE_CATEGORIES: readonly OwaspCategoryId[] = [
+  "LLM01", "LLM06", "LLM08",
+] as const;
+
+/**
  * Display rank for severity. Lower number renders earlier.
  * Critical (0) → low (3) — the natural "most-severe-first" ordering
  * used by both the vulnerabilities list sort and any future

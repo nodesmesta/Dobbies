@@ -7,6 +7,9 @@ import {
   SimulationTurn,
   GuardrailConfig,
   DetectedAgent,
+  OWASP_CATEGORY_IDS,
+  OWASP_CATEGORY_LABELS,
+  OwaspCategoryId,
 } from "@/lib/audit/types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -112,7 +115,26 @@ export function useLiveAudit({ agent, onComplete }: UseLiveAuditArgs): UseLiveAu
     setIsRunning(true);
     setStatusMessages([]);
     setSessions(new Map());
-    setCategoryMeta(new Map());
+
+    // Pre-seed the OWASP category list with all 10 buckets in running
+    // state so the user immediately sees the live simulation checklist
+    // when an audit starts, regardless of whether the static analyzer
+    // produces findings. This matches the docs/landing-page contract
+    // that "multi-turn red-team simulation runs for every audit" — the
+    // list is visible from the first SSE byte, not gated on
+    // static_result. Static findings then increment vuln counts per
+    // category; chat_turn events add per-turn data; partial_score flips
+    // each bucket to "done" as its session finishes.
+    const initialCategories = new Map<string, CategoryMeta>();
+    for (const cat of OWASP_CATEGORY_IDS) {
+      initialCategories.set(cat, {
+        label: OWASP_CATEGORY_LABELS[cat],
+        status: "running",
+        vulns: 0,
+      });
+    }
+    setCategoryMeta(initialCategories);
+
     setSelectedCategory(null);
     setStaticResult(null);
     setPhase("static");

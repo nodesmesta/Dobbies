@@ -46,7 +46,7 @@ begin
         timeout_milliseconds => 5000
       ) into v_job_id;
 
-      raise log '[notify_audit_complete] vercel webhook job=% for report=% user=%',
+      raise log '[notify_audit_complete] vercel webhook job=%% for report=%% user=%%',
         v_job_id, new.id, new.user_id;
 
       return new;

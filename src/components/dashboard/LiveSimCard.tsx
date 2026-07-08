@@ -3,6 +3,7 @@
 import { Fragment, useRef, useEffect } from "react";
 import { SimulationTurn } from "@/lib/audit/types";
 import type { CategoryMeta } from "@/hooks/useLiveAudit";
+import { renderMarkdown } from "@/lib/markdown";
 /**
  * The dedicated transcript card for a live red-team simulation. Lives on
  * the RIGHT column of `<LiveAuditView/>` — the `.ard-vuln-detail-panel`
@@ -108,7 +109,7 @@ export function LiveSimCard({
                 <div className="ar-chat-row ar-chat-row--attacker">
                   <div className="ar-chat-bubble ar-chat-bubble--attacker">
                     <span className="ar-chat-sender">Attacker</span>
-                    <span className="ar-chat-text">{pair.attackerText}</span>
+                    <div className="ar-chat-text">{renderMarkdown(pair.attackerText)}</div>
                   </div>
                 </div>
               )}
@@ -119,7 +120,7 @@ export function LiveSimCard({
                     {pair.compromised && (
                       <span className="ar-chat-compromised">⚠ Compromised</span>
                     )}
-                    <span className="ar-chat-text">{pair.agentText}</span>
+                    <div className="ar-chat-text">{renderMarkdown(pair.agentText)}</div>
                   </div>
                 </div>
               )}

@@ -735,8 +735,6 @@
   font-size: 0.8rem;
   color: var(--color-text-primary);
   line-height: 1.5;
-  margin: 0;
-  font-family: var(--font-mono);
   word-break: break-word;
 }
 

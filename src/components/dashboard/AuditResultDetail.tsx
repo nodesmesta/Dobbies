@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { AuditReport, Vulnerability, SEVERITY_RANK } from "@/lib/audit/types";
 import { ScoreRing, SeverityBadge } from "@/components/dashboard/AuditComponents";
+import { renderMarkdown } from "@/lib/markdown";
 
 type ActiveTab = "vulnerabilities" | "simulation" | "guardrails";
 
@@ -222,7 +223,7 @@ export default function AuditResultDetail({
                       <span className="ar-chat-compromised">⚠ COMPROMISED</span>
                     )}
                   </div>
-                  <p className="ar-chat-text">{turn.text}</p>
+                  <div className="ar-chat-text">{renderMarkdown(turn.text)}</div>
                 </div>
                 </div>
               );

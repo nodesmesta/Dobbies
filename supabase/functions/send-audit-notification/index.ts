@@ -1,11 +1,11 @@
 /**
  * send-audit-notification
  *
- * Supabase Edge Function yang dipanggil dari database trigger setelah
- * audit_report selesai di-insert. Fungsi ini:
- *   1. Menerima data report dari trigger
- *   2. Lookup email user dari auth.users
- *   3. Kirim notifikasi via Resend API
+ * Supabase Edge Function triggered by the database after an audit report
+ * is completed. This function:
+ *   1. Receives report data from the trigger payload
+ *   2. Looks up the user's email via the Auth Admin API
+ *   3. Sends a notification email via the Resend API
  *
  * Trigger → net.http_post() → Edge Function → Resend API → ✉️ User
  */
@@ -65,15 +65,13 @@ Deno.serve(async (req: Request) => {
     const email = userData.user.email;
     console.log(`[send-audit-notification] resolved email: ${email}`);
 
-    // ── 2. Kirim email via Resend ────────────────────────────
+    // ── 2. Send email via Resend ─────────────────────────────
     const resendApiKey = Deno.env.get("RESEND_API_KEY");
     if (!resendApiKey) {
       throw new Error("RESEND_API_KEY not configured in Supabase secrets");
     }
 
-    // Di mode development / testing, Resend cuma bisa kirim ke
-    // email terverifikasi. Ganti `from` begitu punya domain sendiri.
-    const subject = `✅ Dobbies Audit Selesai: ${agent_name} — Skor ${overall_score}/100`;
+    const subject = `✅ Dobbies Audit Complete: ${agent_name} — Score ${overall_score}/100`;
 
     const res = await fetch("https://api.resend.com/emails", {
       method: "POST",
@@ -213,18 +211,18 @@ function buildAuditEmailHtml(opts: {
       <div class="divider"></div>
 
       <p style="color: #475569; font-size: 14px; line-height: 1.6;">
-        Audit agent <strong>${agent_name}</strong> sudah selesai.
+        Audit of agent <strong>${agent_name}</strong> has completed.
         ${vulnerability_count > 0
-          ? `Ditemukan <strong>${vulnerability_count} kerentanan</strong> dengan ${critical_count} critical, ${high_count} high, ${medium_count} medium, ${low_count} low.`
-          : "Tidak ditemukan kerentanan berarti."}
+          ? `Found <strong>${vulnerability_count} vulnerabilit${vulnerability_count !== 1 ? "ies" : "y"}</strong>: ${critical_count} critical, ${high_count} high, ${medium_count} medium, ${low_count} low.`
+          : "No significant vulnerabilities were detected."}
         ${compromised_count > 0
-          ? `<br><br>⚠️ <strong>${compromised_count} turn simulation</strong> berhasil mengeksploitasi agent — proof of concept terkonfirmasi.`
+          ? `<br><br>⚠️ <strong>${compromised_count} simulation turn${compromised_count !== 1 ? "s" : ""}</strong> successfully exploited the agent — proof of concept confirmed.`
           : ""}
       </p>
 
       <div class="footer">
         <p>Dobbies — AI Agent Security Auditor</p>
-        <p style="margin-top:4px">Email ini dikirim otomatis setelah audit selesai.</p>
+        <p style="margin-top:4px">This email was sent automatically when your audit completed.</p>
       </div>
     </div>
   </div>

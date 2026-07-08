@@ -695,28 +695,10 @@ export async function POST(request: NextRequest) {
 
         trace(`phase 2 start: ${byCategory.size} OWASP categories (parallel across categories)`);
 
-        // Cross-category accumulators. DECLARED HERE (before the map call
-        // below) so async callbacks can reference them without hitting a
-        // temporal-dead-zone (TDZ) ReferenceError. Until now these were
-        // declared *after* `await Promise.allSettled(categoryJobs)`, so any
-        // inner `sessionScores.push(...)` invocation crashed the callback
-        // — Vercel bundle minified the name to a single letter ("E") in
-        // logs. Every category session aborted, the aggregation pass
-        // observed 0 turns, and post-verdict marked every vuln
-        // `effective_severity='low'` because policy says "no PoC →
-        // potential-only" when simulation_turns is empty.
         const fullTranscript: SandboxTurn[] = [];
         const sessionScores: number[] = [];
         const sessionResults: { category: string; score: number; compromisedLocal: number[] }[] = [];
 
-        // ── Launch every category session in parallel via Promise.allSettled.
-        // Inner turn loop stays sequential (each turn needs prior transcript
-        // context); parallelism is across OWASP categories, which are
-        // independent. With 6 categories × 3 turns sequential inside, wall-
-        // time was ~280-310s sequential; parallel drops it to roughly the
-        // max slowest category (~50-80s) — well under the 300s Vercel cap.
-        // Callbacks RETURN the per-category result; the outer aggregation
-        // loop below merges into the accumulators declared above.
         const categoryJobs = Array.from(byCategory.entries()).map(async ([categoryId, categoryVulns]) => {
           const label = CATEGORY_LABELS[categoryId] ?? categoryId;
 
@@ -1008,7 +990,7 @@ export async function POST(request: NextRequest) {
             static_score: staticScore,
             dynamic_score: dynamicScore,
             overall_score: overallScore,
-            status: "completed",
+            status: "running",
             // Provenance chain — only populated when the prompt was GitHub-fetched.
             // For client-supplied systemPrompt/content (no GitHub fetch), these
             // remain NULL so the provenance chain honestly reflects what we proved.
@@ -1124,6 +1106,7 @@ export async function POST(request: NextRequest) {
               compromised_count: compromisedCount,
               static_score: effectiveStaticScore,
               overall_score: effectiveOverallScore,
+              status: "completed",
             })
             .eq("id", reportId);
 

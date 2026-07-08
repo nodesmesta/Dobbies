@@ -2857,13 +2857,171 @@
   font-size: 0.75rem;
 }
 
-/* Narrow viewports: collapse split to a vertically stacked layout. */
+/* Narrow viewports: collapse split to a vertically stacked layout.
+
+   Note: `.sim-split-layout` is no longer used (split was lifted to the
+   page level — `ard-page-container` 2-col layout), so we don't reference
+   it here. We still tighten the category list height so mobile users
+   see a compact list before tapping into the dedicated card below. */
 @media (max-width: 720px) {
-  .sim-split-layout {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto 1fr;
+  .sim-category-list {
+    max-height: 240px;
+  }
+}
+
+/* ── Mobile (≤ 680px) — full-bleed stacked layout for run-audit ──
+
+   Below 680px the dashboard sidebar collapses to a slide-out drawer
+   (handled in db- mobile rules above), so the main area gets the full
+   viewport width. Inside that area run-audit is `ard-page-container`
+   stacked. We override the desktop `leftBasis` clamp so the LEFT
+   (AuditRunner) and RIGHT (LiveSimCard) each take the full width of
+   the stacked column instead of competing for 420px+ within an
+   undersized viewport.
+
+   Touch-target sizes follow Apple HIG / Material Guidance (≥ 44px).
+
+   Drop the desktop sticky on the dedicated card — sticky inside a
+   stacked column on mobile gives no useful affordance; users scroll
+   the page naturally instead. */
+@media (max-width: 680px) {
+  .ard-page-container {
+    /* Tighter outer padding so content reaches the navbar's edge on
+       narrow devices. box-sizing already set above. */
+    padding: 0.625rem 0.75rem;
+    gap: 0.875rem;
+  }
+  /* Force both AuditRunner and LiveSimCard to full stacked width,
+     overriding the inline leftBasis prop without needing a JS switch. */
+  .ard-page-container > div {
+    flex: 1 1 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+  }
+
+  /* Agent card — tighter padding, tools row wraps with smaller gap. */
+  .ar-agent-card {
+    padding: 0.875rem 1rem;
+    gap: 0.75rem;
+  }
+  .ar-agent-meta {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.625rem;
+  }
+  .ar-agent-meta-left {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+  .ar-agent-name {
+    font-size: 1rem;
+  }
+  .ar-agent-path {
+    font-size: 0.75rem;
+    /* Long repo paths: truncate from the front so the filename stays
+       visible — easier to identify on a small screen. */
+    direction: rtl;
+    text-align: left;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+    white-space: nowrap;
+  }
+  .ar-agent-tools-row {
+    flex-wrap: wrap;
+    gap: 0.375rem;
+  }
+  .rs-tool-chip {
+    font-size: 0.7rem;
+    padding: 0.2rem 0.5rem;
+  }
+
+  /* Run button — 44px+ tap target per Apple HIG. */
+  .ar-run-btn {
+    min-height: 44px;
+    font-size: 0.875rem;
+  }
+  .ar-back-btn {
+    min-height: 40px;
+    padding: 0.5rem 0.75rem;
+  }
+
+  /* Progress panel — keep status log compact. */
+  .ar-progress-panel {
+    padding: 0;
+    gap: 0.75rem;
+  }
+  .ar-progress-header {
+    padding: 0.75rem 1rem;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.25rem;
+  }
+  .ar-status-log {
+    padding: 0.625rem 1rem;
+    max-height: 160px;
+  }
+  .ar-chat-label {
+    padding: 0 1rem;
+    font-size: 0.7rem;
   }
   .sim-category-list {
-    max-height: 200px;
+    padding: 0 1rem 0.75rem;
+  }
+  .sim-category-list-item {
+    /* 44px+ tap target — buttons must be friendly to thumbs. */
+    min-height: 60px;
+    padding: 0.875rem 1rem;
+  }
+  .sim-cat-row2 {
+    font-size: 0.8125rem;
+  }
+
+  /* Dedicated live card — tighter padding; same visual rhythm at
+     smaller scale. min/max-width already ensure no horizontal bleed. */
+  .sim-live-card {
+    padding: 1rem;
+    gap: 1rem;
+  }
+  .sim-empty-shell {
+    padding: 1rem;
+  }
+
+  /* Status log / section bodies / turn dividers — make sure
+     long monospace blocks wrap properly on narrow screens. */
+  .sim-turn-divider {
+    flex-wrap: wrap;
+  }
+  .sim-turn-target-title {
+    flex: 1 1 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .sim-section-body {
+    font-size: 0.75rem;
+    line-height: 1.55;
+    padding: 0.625rem 0.75rem;
+  }
+  .sim-eval-footer {
+    flex-wrap: wrap;
+    gap: 0.375rem;
+  }
+}
+
+/* Very narrow phones (≤ 380px) — extra padding reduction. */
+@media (max-width: 380px) {
+  .ard-page-container {
+    padding: 0.5rem;
+  }
+  .ar-agent-card,
+  .ar-progress-panel,
+  .sim-live-card {
+    border-radius: var(--radius-md);
+  }
+  .sim-section-body {
+    /* Slightly smaller monospace on tiny screens so a single character
+       boundary isn't dominated by line width. */
+    font-size: 0.7rem;
   }
 }

@@ -678,7 +678,7 @@
   background: var(--color-border-subtle); border-radius: 2px;
 }
 
-/* Row wrapper — flex container so the bubble's alignment is driven here */
+/* Row wrapper — flex container driving bubble alignment */
 .ar-chat-row {
   display: flex;
   flex-direction: column;
@@ -686,11 +686,15 @@
 .ar-chat-row--attacker { align-items: flex-start; }
 .ar-chat-row--agent    { align-items: flex-end; }
 
+/* Compact chatter bubble — chat-timeline idiom for the live
+   transcript. Tighter padding, narrower max-width so attacker and
+   agent bubbles feel like ping-pong messages rather than report
+   sections. */
 .ar-chat-bubble {
   border-radius: var(--radius-md);
-  padding: 0.75rem 1rem;
-  display: flex; flex-direction: column; gap: 0.375rem;
-  max-width: 88%;
+  padding: 0.5rem 0.75rem;
+  display: flex; flex-direction: column; gap: 0.25rem;
+  max-width: 82%;
   width: fit-content;
 }
 .ar-chat-bubble--attacker {
@@ -702,25 +706,25 @@
   border: 1px solid rgba(52,211,153,0.2);
 }
 .ar-chat-sender {
-  font-size: 0.7rem; font-weight: 700;
+  font-size: 0.65rem; font-weight: 700;
   color: var(--color-text-muted);
   text-transform: uppercase; letter-spacing: 0.06em;
-  display: flex; align-items: center; gap: 0.5rem;
+  display: flex; align-items: center; gap: 0.4rem;
   flex-wrap: wrap;
 }
 .ar-chat-compromised {
   background: rgba(248,113,113,0.15);
   color: #f87171;
   border: 1px solid rgba(248,113,113,0.3);
-  padding: 0.1rem 0.45rem; border-radius: 999px;
-  font-size: 0.65rem; font-weight: 700;
+  padding: 0.05rem 0.4rem; border-radius: 999px;
+  font-size: 0.6rem; font-weight: 700;
 }
 .ar-chat-target {
   background: rgba(251,191,36,0.12);
   color: #fbbf24;
   border: 1px solid rgba(251,191,36,0.25);
-  padding: 0.1rem 0.45rem; border-radius: 999px;
-  font-size: 0.6rem; font-weight: 600;
+  padding: 0.05rem 0.4rem; border-radius: 999px;
+  font-size: 0.55rem; font-weight: 600;
   font-family: var(--font-mono);
   max-width: 180px;
   overflow: hidden;
@@ -728,9 +732,9 @@
   white-space: nowrap;
 }
 .ar-chat-text {
-  font-size: 0.8375rem;
+  font-size: 0.8rem;
   color: var(--color-text-primary);
-  line-height: 1.55;
+  line-height: 1.5;
   margin: 0;
   font-family: var(--font-mono);
   word-break: break-word;
@@ -2671,19 +2675,25 @@
    overflow-y:auto, so the dashboard page navigates long transcripts
    naturally (no nested scrolling). */
 
+/* Compact + modern live transcript card.
+
+   The right-column dedicated surface now reads more like a chat
+   timeline and less like a sectioned report. We dropped padding
+   from 1.5rem to 1rem, gap from 1.25rem to 0.625rem, moved radius
+   from var(--radius-lg) to var(--radius-md), and trimmed bubble
+   padding / max-width. The header label is now a single-line tag
+   row instead of an uppercase divider block; the per-turn divider
+   became a subtle accent stripe rather than a chunky card-header.
+   Goal: the card fits comfortably across the right column at
+   320-540px widths without feeling oversized. */
 .sim-live-card {
-  /* Dedicated card surface for the live transcript of one OWASP
-     category — same shape and tokens as VulnDetailCard so users
-     see the same visual grammar during live preview and after. */
   background: var(--color-surface-3);
   border: 1px solid var(--color-border-subtle);
-  border-radius: var(--radius-lg);
-  padding: 1.5rem;
+  border-radius: var(--radius-md);
+  padding: 1rem;
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
-  /* Containment + bleed-prevention: long monospace turn bodies or
-     unbroken target titles must not escape the card horizontally. */
+  gap: 0.625rem;
   min-width: 0;
   max-width: 100%;
   overflow-x: hidden;
@@ -2698,20 +2708,21 @@
 .sim-empty-hint {
   text-align: center;
   color: var(--color-text-muted);
-  font-size: 0.85rem;
-  padding: 2rem 1rem;
+  font-size: 0.8rem;
+  padding: 1.25rem 0.75rem;
+  line-height: 1.5;
 }
 
-/* Top header of the panel — same uppercase divider block as the
-   title+badges block in VulnDetailCard. */
+/* Compact tag-style header — one line of category + label, no
+   uppercase block or 1rem bottom-padding divider. */
 .sim-transcript-header {
   display: flex;
   align-items: center;
-  gap: 0.625rem;
-  padding-bottom: 1rem;
+  gap: 0.5rem;
+  padding-bottom: 0.375rem;
   border-bottom: 1px solid var(--color-border-subtle);
-  font-size: 0.8125rem;
-  letter-spacing: 0.05em;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   font-weight: 700;
   color: var(--color-text-secondary);
@@ -2719,35 +2730,34 @@
 .sim-transcript-cat {
   font-family: var(--font-mono);
   color: var(--color-accent-red);
+  font-size: 0.7rem;
 }
 .sim-transcript-label {
   color: var(--color-text-secondary);
   font-weight: 600;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.03em;
 }
 
-/* Per-turn divider — sits inline as a sibling in the panel,
-   not within a wrapper block. Top margin separates it from
-   the previous turn's agent section; bottom border + padding
-   signals the start of a new turn block. */
+/* Per-turn divider — now a single inline accent row, not a chunky
+   separator. margin-top 0rem (gap on the parent .sim-live-card
+   already spaces turns); bottom border kept but thinner padding. */
 .sim-turn-divider {
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  font-size: 0.75rem;
+  font-size: 0.7rem;
   color: var(--color-text-muted);
-  margin-top: 0.5rem;
-  padding-bottom: 0.625rem;
-  border-bottom: 1px solid var(--color-border-subtle);
+  padding: 0.25rem 0;
+  border-top: 1px solid var(--color-border-subtle);
   font-family: var(--font-mono);
 }
 .sim-turn-num {
   background: rgba(255, 255, 255, 0.04);
   border: 1px solid var(--color-border-subtle);
-  border-radius: 4px;
-  padding: 0.05rem 0.4rem;
+  border-radius: 3px;
+  padding: 0.05rem 0.35rem;
   font-weight: 700;
-  font-size: 0.65rem;
+  font-size: 0.6rem;
   letter-spacing: 0.04em;
   color: var(--color-text-secondary);
 }
@@ -2814,25 +2824,28 @@
   letter-spacing: 0.04em;
 }
 
+/* Compact eval footer — slim horizontal rule with tabular score.
+   Score font shrunk from 1.125rem to 0.9rem so the bottom block
+   doesn't overpower the chat timeline above. */
 .sim-eval-footer {
   display: flex;
   align-items: center;
-  gap: 0.625rem;
+  gap: 0.5rem;
   flex-wrap: wrap;
-  padding-top: 0.75rem;
+  padding-top: 0.5rem;
   border-top: 1px solid var(--color-border-subtle);
-  font-size: 0.8rem;
+  font-size: 0.75rem;
 }
 .sim-eval-label {
   color: var(--color-text-muted);
-  font-size: 0.7rem;
+  font-size: 0.65rem;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   font-weight: 600;
 }
 .sim-eval-score {
-  font-size: 1.125rem;
-  font-weight: 800;
+  font-size: 0.9rem;
+  font-weight: 700;
   color: var(--color-text-primary);
   font-variant-numeric: tabular-nums;
 }

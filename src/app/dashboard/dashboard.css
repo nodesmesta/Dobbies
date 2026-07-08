@@ -2539,23 +2539,19 @@
   margin-left: 0.5rem;
 }
 
-.sim-split-layout {
-  /* Left list gains a slightly wider column so a category
-     label can show across one line; the right column gets
-     the remaining width as a fully dedicated surface for
-     the live transcript card. */
-  display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
-  gap: 1.25rem;
-  margin-top: 0.5rem;
-}
+/* (Split grid moved up to the page level: LiveAuditView now wraps
+   `<AuditRunner>` (left) + `<LiveSimCard>` (right) inside an
+   `ard-page-container` flexbox — same idiom as the audit-detail
+   page's left+right split. The old `.sim-split-layout` grid that
+   lived inside `.audit-runner` is intentionally gone.) */
 
 .sim-category-list {
   display: flex;
   flex-direction: column;
   gap: 0.4rem;
-  max-height: 480px;
-  overflow-y: auto;
+  /* No max-height — the list grows naturally with category card height.
+     The dashboard page scrolls if the list exceeds the viewport; the
+     list is no longer constrained by an inner 480px clip. */
   padding-right: 4px;
 }
 .sim-category-list::-webkit-scrollbar { width: 4px; }
@@ -2648,24 +2644,11 @@
   margin-left: 0.375rem;
 }
 
-.sim-transcript-panel {
-  /* Layout-only wrapper — no visual surface, exactly like
-     .ard-vuln-detail-panel in the audit-detail page. The
-     actual dedicated card lives inside as `.sim-live-card`,
-     mirroring how `<VulnDetailCard>` sits inside
-     `.ard-vuln-detail-panel`. No max-height: the transcript
-     card grows naturally with content (dashboard page scrolls
-     if needed), so the right column is *fully dedicated* to
-     the live chat — not a fixed-height clipped panel. */
-  position: sticky;
-  top: 1rem;
-  align-self: start;
-}
-.sim-transcript-panel::-webkit-scrollbar { width: 6px; }
-.sim-transcript-panel::-webkit-scrollbar-thumb {
-  background: var(--color-border-subtle);
-  border-radius: 3px;
-}
+/* Live transcript wrap was removed: the dedicated `.sim-live-card`
+   now mounts directly inside `.ard-vuln-detail-panel` on the page.
+   The right column owner already supplies position:sticky +
+   overflow-y:auto, so the dashboard page navigates long transcripts
+   naturally (no nested scrolling). */
 
 .sim-live-card {
   /* Dedicated card surface for the live transcript of one OWASP
@@ -2679,6 +2662,20 @@
   flex-direction: column;
   gap: 1.25rem;
 }
+
+.sim-empty-shell {
+  /* Shown before the audit publishes any category data — the right
+     column placeholder. Same surface tokens as `.sim-live-card` so
+     the column always shows a card, never a void. */
+  background: var(--color-surface-3);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 1.5rem;
+  text-align: center;
+  color: var(--color-text-muted);
+  font-size: 0.85rem;
+}
+.sim-empty-shell p { margin: 0.375rem 0; }
 
 .sim-empty-hint {
   text-align: center;

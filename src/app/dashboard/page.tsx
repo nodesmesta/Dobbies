@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { AuditReport, DetectedAgent, Vulnerability } from "@/lib/audit/types";
-import { AuditRunner } from "@/components/dashboard/AuditPanel";
+import { LiveAuditView } from "@/components/dashboard/LiveAuditView";
 import AuditResultDetail from "@/components/dashboard/AuditResultDetail";
 import RepoScanner from "@/components/dashboard/RepoScanner";
 import SettingsPanel from "@/components/dashboard/SettingsPanel";
@@ -214,7 +214,7 @@ export default function DashboardPage() {
           )}
 
           {panelView === "run-audit" && selectedAgent && (
-            <AuditRunner
+            <LiveAuditView
               agent={selectedAgent}
               onAuditComplete={handleAuditComplete}
               onBack={() => setPanelView("scan-repo")}

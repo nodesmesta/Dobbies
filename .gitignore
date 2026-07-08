@@ -4,7 +4,7 @@
 /node_modules
 /.pnp
 .pnp.*
-/package-lock.json
+# package-lock.json is intentionally committed for deterministic installs
 .yarn/*
 !.yarn/patches
 !.yarn/plugins

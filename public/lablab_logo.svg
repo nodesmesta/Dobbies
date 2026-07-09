@@ -1,8 +1,15 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
-  <!-- LabLab AI - lab flask icon -->
-  <rect x="4" y="4" width="40" height="40" rx="10" fill="#FF6B35" opacity="0.9"/>
-  <path d="M18 12v10l-4 6v4a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-4l-4-6V12" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
-  <path d="M22 12v4l-2 3" stroke="white" stroke-width="2" stroke-linecap="round" fill="none" opacity="0.6"/>
-  <line x1="18" y1="28" x2="30" y2="28" stroke="white" stroke-width="1.5" opacity="0.4"/>
-  <circle cx="24" cy="30" r="2" fill="white" opacity="0.3"/>
+  <!-- LabLab AI brand icon: two stylized "L" letterforms -->
+  <!-- Left "L": vertical bar -->
+  <rect x="8" y="6" width="4" height="36" rx="2" fill="white"/>
+  <!-- Left "L": horizontal bar (top) -->
+  <rect x="8" y="6" width="16" height="4" rx="2" fill="white"/>
+  <!-- Left "L": horizontal bar (bottom) -->
+  <rect x="8" y="38" width="16" height="4" rx="2" fill="white"/>
+  <!-- Right "L": vertical bar -->
+  <rect x="28" y="6" width="4" height="36" rx="2" fill="white"/>
+  <!-- Right "L": horizontal bar (top) -->
+  <rect x="28" y="6" width="16" height="4" rx="2" fill="white"/>
+  <!-- Right "L": horizontal bar (bottom) -->
+  <rect x="28" y="38" width="16" height="4" rx="2" fill="white"/>
 </svg>

@@ -4,6 +4,7 @@ import { useState } from "react";
 import Navbar from "@/components/landing/Navbar";
 import Hero from "@/components/landing/Hero";
 import Features from "@/components/landing/Features";
+import PoweredMarquee from "@/components/landing/PoweredMarquee";
 import Orchestration from "@/components/landing/Orchestration";
 import Scope from "@/components/landing/Scope";
 import FAQ from "@/components/landing/FAQ";
@@ -24,6 +25,7 @@ export default function LandingPage() {
     <div className={styles.page}>
       <Navbar />
       <Hero />
+      <PoweredMarquee />
       <Features features={features} />
       <Orchestration
         steps={orchestrationSteps}

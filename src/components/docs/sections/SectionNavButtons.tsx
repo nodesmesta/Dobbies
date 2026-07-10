@@ -4,6 +4,7 @@ import styles from "../docs.module.css";
 
 const SECTION_ORDER = [
   { id: "overview", label: "Overview" },
+  { id: "scan-scope", label: "Agent Scan Scope" },
   { id: "pipeline", label: "How Audit Works" },
   { id: "scores", label: "Score Guide" },
   { id: "owasp", label: "OWASP LLM Top 10" },

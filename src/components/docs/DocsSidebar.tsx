@@ -18,6 +18,7 @@ const NAV_SECTIONS: SidebarGroup[] = [
     group: "Getting Started",
     items: [
       { href: "overview", label: "Overview" },
+      { href: "scan-scope", label: "Agent Scan Scope" },
       { href: "pipeline", label: "How Audit Works" },
       { href: "scores", label: "Score Guide" },
     ],

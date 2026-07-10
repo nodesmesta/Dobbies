@@ -7,6 +7,7 @@ import styles from "../../components/docs/docs.module.css";
 import DocsSidebar from "@/components/docs/DocsSidebar";
 
 import Overview from "@/components/docs/sections/Overview";
+import AgentScanScope from "@/components/docs/sections/AgentScanScope";
 import Pipeline from "@/components/docs/sections/Pipeline";
 import ScoreGuide from "@/components/docs/sections/ScoreGuide";
 import OwaspReference from "@/components/docs/sections/OwaspReference";
@@ -24,6 +25,7 @@ import SectionNavButtons from "@/components/docs/sections/SectionNavButtons";
 
 const SECTION_COMPONENTS: Record<string, React.ComponentType> = {
   overview: Overview,
+  "scan-scope": AgentScanScope,
   pipeline: Pipeline,
   scores: ScoreGuide,
   owasp: OwaspReference,
